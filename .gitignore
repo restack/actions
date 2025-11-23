@@ -3,6 +3,12 @@ node_modules/
 
 # Build
 dist/
+!actions/*/dist/
+
+# Ignore compiled files in src
+src/**/*.js
+src/**/*.d.ts
+src/**/*.d.ts.map
 lib/
 *.tsbuildinfo
 
