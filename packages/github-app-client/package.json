@@ -1,0 +1,16 @@
+{
+  "name": "@restack/github-app-client",
+  "version": "0.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@octokit/app": "^14.1.0",
+    "@octokit/auth-app": "^6.1.4",
+    "@octokit/rest": "^20.1.2"
+  }
+}

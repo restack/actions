@@ -1,0 +1,25 @@
+name: Test K8s Manifest Updater
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: 'Image to update'
+        required: true
+        default: 'myapp:v1.0.0'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Update Manifest
+        uses: ./actions/k8s-manifest-updater
+        with:
+          app_id: ${{ secrets.APP_ID }}
+          private_key: ${{ secrets.APP_PRIVATE_KEY }}
+          installation_id: ${{ secrets.APP_INSTALLATION_ID }}
+          image: ${{ inputs.image }}
+          manifest_repo: restack/k8s-manifests
+          manifest_path: deployments/app/deployment.yaml

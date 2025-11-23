@@ -1,0 +1,45 @@
+name: 'K8s Manifest Updater'
+description: 'Update Kubernetes manifests with new container images'
+author: 'restack'
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'
+
+inputs:
+  app_id:
+    description: 'GitHub App ID'
+    required: true
+  private_key:
+    description: 'GitHub App Private Key'
+    required: true
+  installation_id:
+    description: 'GitHub App Installation ID'
+    required: false
+  image:
+    description: 'Container image with tag'
+    required: true
+  container_name:
+    description: 'Name of the container to update. If not provided, updates the first container.'
+    required: false
+  manifest_repo:
+    description: 'Repository containing manifests'
+    required: true
+  manifest_path:
+    description: 'Path to manifest file'
+    default: 'k8s/deployment.yaml'
+  branch:
+    description: 'Branch to update'
+    default: 'main'
+  create_pr:
+    description: 'Create PR instead of direct push'
+    default: 'false'
+
+outputs:
+  commit_sha:
+    description: 'SHA of the commit created'
+  pr_url:
+    description: 'URL of PR if created'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

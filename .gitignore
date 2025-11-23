@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+lib/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Tools
+.turbo/
+coverage/
+
+# Environment
+.env
+
+# Secrets
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# GitHub App secrets
+github-app.pem
