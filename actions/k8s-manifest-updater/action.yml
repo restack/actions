@@ -16,10 +16,16 @@ inputs:
     description: 'GitHub App Installation ID'
     required: false
   image:
-    description: 'Container image with tag'
+    description: 'The new image to set (e.g. my-image:v2)'
     required: true
+  yaml_path:
+    description: 'Path to the field to update (e.g. spec.template.spec.containers[0].image). Supports array selection like apps[name=my-app].'
+    required: false
+  nested_yaml_path:
+    description: 'If the target field is a stringified YAML, this is the path inside that string to update.'
+    required: false
   container_name:
-    description: 'Name of the container to update. If not provided, updates the first container.'
+    description: 'Deprecated: Use yaml_path instead. The name of the container to update.'
     required: false
   manifest_repo:
     description: 'Repository containing manifests'

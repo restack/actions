@@ -1,4 +1,4 @@
-import * as yaml from 'js-yaml';
+import { parseDocument, Document, YAMLSeq, isMap, isSeq } from 'yaml';
 import { BaseAction, core } from '@restack/action-core';
 import { GitHubAppClient } from '@restack/github-app-client';
 
@@ -7,6 +7,8 @@ interface Config {
   privateKey: string;
   installationId?: string;
   image: string;
+  yamlPath?: string;
+  nestedYamlPath?: string;
   containerName?: string;
   manifestRepo: string;
   manifestPath: string;
@@ -14,7 +16,7 @@ interface Config {
   createPr: boolean;
 }
 
-class K8sManifestUpdater extends BaseAction {
+export class K8sManifestUpdater extends BaseAction {
   private appClient: GitHubAppClient;
 
   constructor(config: Config) {
@@ -44,39 +46,25 @@ class K8sManifestUpdater extends BaseAction {
       });
 
       if ('content' in file) {
-        // Parse and update YAML
+        // Parse YAML preserving comments
         const content = Buffer.from(file.content, 'base64').toString();
-        const manifest = yaml.load(content) as any;
+        const doc = parseDocument(content);
 
-        // Update image
         let updated = false;
-        const containers = manifest?.spec?.template?.spec?.containers;
 
-        if (containers && Array.isArray(containers)) {
-          if (config.containerName) {
-            const container = containers.find((c: any) => c.name === config.containerName);
-            if (container) {
-              const oldImage = container.image;
-              container.image = config.image;
-              this.log(`Updating image for container '${config.containerName}' from ${oldImage} to ${config.image}`);
-              updated = true;
-            } else {
-              this.log(`Container '${config.containerName}' not found in manifest`);
-            }
-          } else if (containers.length > 0) {
-            const oldImage = containers[0].image;
-            containers[0].image = config.image;
-            this.log(`Updating image for first container from ${oldImage} to ${config.image}`);
-            updated = true;
-          }
+        if (config.yamlPath) {
+          updated = this.updateYamlPath(doc, config.yamlPath, config.image, config.nestedYamlPath);
+        } else {
+          // Legacy behavior
+          updated = this.updateLegacy(doc, config.image, config.containerName);
         }
 
         if (!updated) {
-          this.log('No containers found or updated');
+          this.log('No changes made to manifest');
           return;
         }
 
-        const updatedContent = yaml.dump(manifest);
+        const updatedContent = doc.toString();
 
         if (config.createPr) {
           await this.createPullRequest(octokit, owner, repo, file.sha, updatedContent);
@@ -89,10 +77,37 @@ class K8sManifestUpdater extends BaseAction {
     }
   }
 
+  private updateLegacy(doc: Document, image: string, containerName?: string): boolean {
+    const containers = doc.getIn(['spec', 'template', 'spec', 'containers']) as YAMLSeq;
+
+    if (containers && isSeq(containers)) {
+      if (containerName) {
+        for (const item of containers.items) {
+          if (isMap(item) && item.get('name') === containerName) {
+            const oldImage = item.get('image');
+            item.set('image', image);
+            this.log(`Updating image for container '${containerName}' from ${oldImage} to ${image}`);
+            return true;
+          }
+        }
+        this.log(`Container '${containerName}' not found in manifest`);
+      } else if (containers.items.length > 0) {
+        const first = containers.items[0];
+        if (isMap(first)) {
+          const oldImage = first.get('image');
+          first.set('image', image);
+          this.log(`Updating image for first container from ${oldImage} to ${image}`);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async directUpdate(octokit: any, owner: string, repo: string, sha: string, content: string) {
     const config = this.config as Config;
     const imageTag = config.image.split(':').pop() || 'latest';
-
     const result = await octokit.repos.createOrUpdateFileContents({
       owner,
       repo,
@@ -106,7 +121,7 @@ class K8sManifestUpdater extends BaseAction {
     core.setOutput('commit_sha', result.data.commit.sha);
     this.log(`✅ Updated manifest with commit ${result.data.commit.sha}`);
   }
-
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async createPullRequest(octokit: any, owner: string, repo: string, sha: string, content: string) {
     const config = this.config as Config;
     const imageTag = config.image.split(':').pop() || 'latest';
@@ -150,24 +165,105 @@ class K8sManifestUpdater extends BaseAction {
     core.setOutput('pr_url', pr.data.html_url);
     this.log(`✅ Created PR: ${pr.data.html_url}`);
   }
+
+  private parsePath(path: string): PathPart[] {
+    // Split by dot, but ignore dots in brackets (not implemented for simplicity yet)
+    return path.split('.').map(p => {
+      const match = p.match(/^(\w+)\[(\w+)=(.+)\]$/);
+      if (match) {
+        return { key: match[1], selector: { key: match[2], value: match[3] } };
+      }
+      return { key: p };
+    });
+  }
+
+  private updateYamlPath(doc: Document, path: string, newValue: string, nestedPath?: string): boolean {
+    const parts = this.parsePath(path);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return this.traverseAndSet(doc.contents as any, parts, newValue, nestedPath);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private traverseAndSet(node: any, parts: PathPart[], newValue: string, nestedPath?: string): boolean {
+    if (parts.length === 0) return false;
+    const part = parts[0];
+    const isLast = parts.length === 1;
+
+    if (isMap(node)) {
+      // 1. Get the value for the key
+      let value = node.get(part.key);
+
+      // 2. If there is a selector, we expect 'value' to be a Seq
+      if (part.selector) {
+        if (isSeq(value)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const found = value.items.find((item: any) =>
+            isMap(item) && item.get(part.selector!.key) === part.selector!.value
+          );
+          if (found) {
+            value = found;
+          } else {
+            this.log(`Could not find item in array for key '${part.key}' with selector '${part.selector.key}=${part.selector.value}'`);
+            return false;
+          }
+        } else {
+          this.log(`Expected a sequence for key '${part.key}' but found ${typeof value}`);
+          return false;
+        }
+      }
+
+      // 3. If this is the last part
+      if (isLast) {
+        if (nestedPath) {
+          // Value should be a string (Helm values)
+          if (typeof value === 'string') {
+            const nestedDoc = parseDocument(value);
+            const nestedUpdated = this.updateYamlPath(nestedDoc, nestedPath, newValue);
+            if (nestedUpdated) {
+              node.set(part.key, nestedDoc.toString());
+              this.log(`Updated nested path '${nestedPath}' within '${part.key}' to '${newValue}'`);
+              return true;
+            }
+          }
+          this.log(`Expected a string value for key '${part.key}' to parse nested YAML, but found ${typeof value}`);
+          return false;
+        } else {
+          // Direct update
+          const oldValue = node.get(part.key);
+          node.set(part.key, newValue);
+          this.log(`Updated '${part.key}' from '${oldValue}' to '${newValue}'`);
+          return true;
+        }
+      }
+
+      // 4. Recurse
+      return this.traverseAndSet(value, parts.slice(1), newValue, nestedPath);
+    }
+
+    this.log(`Expected a map for path part '${part.key}' but found ${typeof node}`);
+    return false;
+  }
+}
+
+interface PathPart {
+  key: string;
+  selector?: {
+    key: string;
+    value: string;
+  };
 }
 
 // Entry point
-async function main() {
-  const config: Config = {
-    appId: core.getInput('app_id', { required: true }),
-    privateKey: core.getInput('private_key', { required: true }),
-    installationId: core.getInput('installation_id'),
-    image: core.getInput('image', { required: true }),
-    containerName: core.getInput('container_name'),
-    manifestRepo: core.getInput('manifest_repo', { required: true }),
-    manifestPath: core.getInput('manifest_path') || 'k8s/deployment.yaml',
-    branch: core.getInput('branch') || 'main',
-    createPr: core.getBooleanInput('create_pr')
-  };
-
-  const action = new K8sManifestUpdater(config);
-  await action.run();
-}
-
-main();
+new K8sManifestUpdater({
+  appId: core.getInput('app_id'),
+  privateKey: core.getInput('private_key'),
+  installationId: core.getInput('installation_id'),
+  image: core.getInput('image'),
+  yamlPath: core.getInput('yaml_path'),
+  nestedYamlPath: core.getInput('nested_yaml_path'),
+  containerName: core.getInput('container_name'),
+  manifestRepo: core.getInput('manifest_repo'),
+  manifestPath: core.getInput('manifest_path') || 'k8s/deployment.yaml',
+  branch: core.getInput('branch') || 'main',
+  createPr: core.getBooleanInput('create_pr')
+}).run();
