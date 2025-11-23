@@ -42879,6 +42879,7 @@ exports.BaseAction = BaseAction;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.GitHubAppClient = void 0;
 const app_1 = __nccwpck_require__(7953);
+const rest_1 = __nccwpck_require__(9360);
 class GitHubAppClient {
     config;
     app;
@@ -42887,6 +42888,7 @@ class GitHubAppClient {
         this.app = new app_1.App({
             appId: Number(config.appId),
             privateKey: config.privateKey,
+            Octokit: rest_1.Octokit,
         });
     }
     async getOctokit() {
@@ -55067,6 +55069,7 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
         }
         return false;
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async directUpdate(octokit, owner, repo, sha, content) {
         const config = this.config;
         const imageTag = config.image.split(':').pop() || 'latest';
@@ -55082,6 +55085,7 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
         action_core_1.core.setOutput('commit_sha', result.data.commit.sha);
         this.log(`✅ Updated manifest with commit ${result.data.commit.sha}`);
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async createPullRequest(octokit, owner, repo, sha, content) {
         const config = this.config;
         const imageTag = config.image.split(':').pop() || 'latest';
@@ -55132,8 +55136,10 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
     }
     updateYamlPath(doc, path, newValue, nestedPath) {
         const parts = this.parsePath(path);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return this.traverseAndSet(doc.contents, parts, newValue, nestedPath);
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     traverseAndSet(node, parts, newValue, nestedPath) {
         if (parts.length === 0)
             return false;
@@ -55145,6 +55151,7 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
             // 2. If there is a selector, we expect 'value' to be a Seq
             if (part.selector) {
                 if ((0, yaml_1.isSeq)(value)) {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     const found = value.items.find((item) => (0, yaml_1.isMap)(item) && item.get(part.selector.key) === part.selector.value);
                     if (found) {
                         value = found;
@@ -55192,24 +55199,19 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
 }
 exports.K8sManifestUpdater = K8sManifestUpdater;
 // Entry point
-async function main() {
-    const config = {
-        appId: action_core_1.core.getInput('app_id', { required: true }),
-        privateKey: action_core_1.core.getInput('private_key', { required: true }),
-        installationId: action_core_1.core.getInput('installation_id'),
-        image: action_core_1.core.getInput('image', { required: true }),
-        yamlPath: action_core_1.core.getInput('yaml_path'),
-        nestedYamlPath: action_core_1.core.getInput('nested_yaml_path'),
-        containerName: action_core_1.core.getInput('container_name'),
-        manifestRepo: action_core_1.core.getInput('manifest_repo', { required: true }),
-        manifestPath: action_core_1.core.getInput('manifest_path') || 'k8s/deployment.yaml',
-        branch: action_core_1.core.getInput('branch') || 'main',
-        createPr: action_core_1.core.getBooleanInput('create_pr')
-    };
-    const action = new K8sManifestUpdater(config);
-    await action.run();
-}
-main();
+new K8sManifestUpdater({
+    appId: action_core_1.core.getInput('app_id'),
+    privateKey: action_core_1.core.getInput('private_key'),
+    installationId: action_core_1.core.getInput('installation_id'),
+    image: action_core_1.core.getInput('image'),
+    yamlPath: action_core_1.core.getInput('yaml_path'),
+    nestedYamlPath: action_core_1.core.getInput('nested_yaml_path'),
+    containerName: action_core_1.core.getInput('container_name'),
+    manifestRepo: action_core_1.core.getInput('manifest_repo'),
+    manifestPath: action_core_1.core.getInput('manifest_path') || 'k8s/deployment.yaml',
+    branch: action_core_1.core.getInput('branch') || 'main',
+    createPr: action_core_1.core.getBooleanInput('create_pr')
+}).run();
 
 })();
 

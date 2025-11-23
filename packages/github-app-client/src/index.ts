@@ -14,6 +14,7 @@ export class GitHubAppClient {
     this.app = new App({
       appId: Number(config.appId),
       privateKey: config.privateKey,
+      Octokit: Octokit,
     });
   }
 
