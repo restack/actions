@@ -1,6 +1,6 @@
 # @restack/actions
 
-Delicious GitHub Actions monorepo for Restack.
+Yet Another Delicious GitHub Actions monorepo for Restack.
 
 ## Actions
 

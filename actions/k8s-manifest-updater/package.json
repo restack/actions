@@ -5,7 +5,7 @@
   "description": "Update K8s manifests with new images",
   "scripts": {
     "build": "ncc build src/index.ts -o dist --license licenses.txt",
-    "test": "jest",
+    "test": "jest --passWithNoTests",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit"
   },
@@ -15,7 +15,10 @@
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.14",
     "@types/js-yaml": "^4.0.9",
-    "@vercel/ncc": "^0.38.4"
+    "@vercel/ncc": "^0.38.4",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.5"
   }
 }
