@@ -107,12 +107,17 @@ export class K8sManifestUpdater extends BaseAction {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async directUpdate(octokit: any, owner: string, repo: string, sha: string, content: string) {
     const config = this.config as Config;
-    const imageTag = config.image.split(':').pop() || 'latest';
+    const { scope, imageTag, imageName } = this.getCommitInfo();
+
+    const message = scope
+      ? `ci(${scope}): update ${imageName} to ${imageTag}`
+      : `ci: update ${imageName} to ${imageTag}`;
+
     const result = await octokit.repos.createOrUpdateFileContents({
       owner,
       repo,
       path: config.manifestPath,
-      message: `🤖 Update image to ${imageTag}`,
+      message,
       content: Buffer.from(content).toString('base64'),
       sha,
       branch: config.branch
@@ -124,8 +129,15 @@ export class K8sManifestUpdater extends BaseAction {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async createPullRequest(octokit: any, owner: string, repo: string, sha: string, content: string) {
     const config = this.config as Config;
-    const imageTag = config.image.split(':').pop() || 'latest';
-    const branchName = `update-image-${Date.now()}`;
+    const { scope, imageTag, imageName } = this.getCommitInfo();
+
+    const message = scope
+      ? `ci(${scope}): update ${imageName} to ${imageTag}`
+      : `ci: update ${imageName} to ${imageTag}`;
+
+    const branchName = scope
+      ? `update-${scope}-${imageTag}`
+      : `update-image-${Date.now()}`;
 
     // Create new branch
     const { data: ref } = await octokit.git.getRef({
@@ -146,7 +158,7 @@ export class K8sManifestUpdater extends BaseAction {
       owner,
       repo,
       path: config.manifestPath,
-      message: `🤖 Update image to ${imageTag}`,
+      message,
       content: Buffer.from(content).toString('base64'),
       sha,
       branch: branchName
@@ -156,7 +168,7 @@ export class K8sManifestUpdater extends BaseAction {
     const pr = await octokit.pulls.create({
       owner,
       repo,
-      title: `Update image to ${imageTag}`,
+      title: `chore: update image to ${imageTag}`,
       body: `Automated update of container image to \`${config.image}\``,
       head: branchName,
       base: config.branch
@@ -242,6 +254,31 @@ export class K8sManifestUpdater extends BaseAction {
 
     this.log(`Expected a map for path part '${part.key}' but found ${typeof node}`);
     return false;
+  }
+
+  private getCommitInfo(): { scope: string; imageTag: string; imageName: string } {
+    const config = this.config as Config;
+
+    const imageParts = config.image.split(':');
+    const imageTag = imageParts.pop() || 'latest';
+    const imagePath = imageParts.join(':');
+    const imageName = imagePath.split('/').pop() || 'unknown';
+
+    let scope = '';
+    if (config.yamlPath) {
+      const match = config.yamlPath.match(/\[name=([^\]]+)\]/);
+      if (match) scope = match[1];
+    }
+
+    if (!scope && config.containerName) {
+      scope = config.containerName;
+    }
+
+    if (!scope) {
+      scope = config.manifestPath.split('/').pop()?.replace('.yaml', '') || '';
+    }
+
+    return { scope, imageTag, imageName };
   }
 }
 

@@ -55077,7 +55077,7 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
             owner,
             repo,
             path: config.manifestPath,
-            message: `🤖 Update image to ${imageTag}`,
+            message: `chore: update image to ${imageTag}`,
             content: Buffer.from(content).toString('base64'),
             sha,
             branch: config.branch
@@ -55107,7 +55107,7 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
             owner,
             repo,
             path: config.manifestPath,
-            message: `🤖 Update image to ${imageTag}`,
+            message: `chore: update image to ${imageTag}`,
             content: Buffer.from(content).toString('base64'),
             sha,
             branch: branchName
@@ -55116,7 +55116,7 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
         const pr = await octokit.pulls.create({
             owner,
             repo,
-            title: `Update image to ${imageTag}`,
+            title: `chore: update image to ${imageTag}`,
             body: `Automated update of container image to \`${config.image}\``,
             head: branchName,
             base: config.branch
