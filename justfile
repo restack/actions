@@ -2,6 +2,10 @@
 default:
   @just --list
 
+# Install system dependencies
+deps:
+  uv tool install pre-commit
+
 # Install dependencies
 install:
   pnpm install

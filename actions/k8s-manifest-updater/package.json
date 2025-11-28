@@ -1,23 +1,23 @@
 {
-  "name": "@restack/k8s-manifest-updater",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Update K8s manifests with new images",
-  "scripts": {
-    "build": "ncc build src/index.ts -o dist --license licenses.txt",
-    "test": "jest --passWithNoTests",
-    "lint": "eslint src",
-    "typecheck": "tsc --noEmit"
-  },
   "dependencies": {
     "@restack/action-core": "workspace:*",
     "@restack/github-app-client": "workspace:*",
     "yaml": "^2.3.4"
   },
+  "description": "Update K8s manifests with new images",
   "devDependencies": {
     "@types/jest": "^29.5.14",
     "@vercel/ncc": "^0.38.4",
     "jest": "^29.7.0",
     "ts-jest": "^29.4.5"
-  }
+  },
+  "name": "@restack/k8s-manifest-updater",
+  "private": true,
+  "scripts": {
+    "build": "ncc build src/index.ts -o dist --license licenses.txt",
+    "lint": "eslint src",
+    "test": "jest --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "version": "0.0.0"
 }

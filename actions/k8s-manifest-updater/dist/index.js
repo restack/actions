@@ -572,8 +572,8 @@ class OidcClient {
             const res = yield httpclient
                 .getJson(id_token_url)
                 .catch(error => {
-                throw new Error(`Failed to get ID Token. \n 
-        Error Code : ${error.statusCode}\n 
+                throw new Error(`Failed to get ID Token. \n
+        Error Code : ${error.statusCode}\n
         Error Message: ${error.message}`);
             });
             const id_token = (_a = res.result) === null || _a === void 0 ? void 0 : _a.value;
@@ -46053,11 +46053,11 @@ class LRUCache {
             b.__abortController instanceof AC);
     }
     async fetch(k, fetchOptions = {}) {
-        const { 
+        const {
         // get options
-        allowStale = this.allowStale, updateAgeOnGet = this.updateAgeOnGet, noDeleteOnStaleGet = this.noDeleteOnStaleGet, 
+        allowStale = this.allowStale, updateAgeOnGet = this.updateAgeOnGet, noDeleteOnStaleGet = this.noDeleteOnStaleGet,
         // set options
-        ttl = this.ttl, noDisposeOnSet = this.noDisposeOnSet, size = 0, sizeCalculation = this.sizeCalculation, noUpdateTTL = this.noUpdateTTL, 
+        ttl = this.ttl, noDisposeOnSet = this.noDisposeOnSet, size = 0, sizeCalculation = this.sizeCalculation, noUpdateTTL = this.noUpdateTTL,
         // fetch exclusive options
         noDeleteOnFetchRejection = this.noDeleteOnFetchRejection, allowStaleOnFetchRejection = this.allowStaleOnFetchRejection, ignoreFetchAbort = this.ignoreFetchAbort, allowStaleOnFetchAbort = this.allowStaleOnFetchAbort, context, forceRefresh = false, status, signal, } = fetchOptions;
         if (!this.#hasFetchMethod) {
@@ -48241,7 +48241,7 @@ class Document {
             replacer = undefined;
         }
         const { aliasDuplicateObjects, anchorPrefix, flow, keepUndefined, onTagObj, tag } = options ?? {};
-        const { onAnchor, setAnchors, sourceObjects } = anchors.createNodeAnchors(this, 
+        const { onAnchor, setAnchors, sourceObjects } = anchors.createNodeAnchors(this,
         // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
         anchorPrefix || 'a');
         const ctx = {
@@ -54945,7 +54945,7 @@ exports.visitAsync = visitAsync;
 /************************************************************************/
 /******/ 	// The module cache
 /******/ 	var __webpack_module_cache__ = {};
-/******/ 	
+/******/
 /******/ 	// The require function
 /******/ 	function __nccwpck_require__(moduleId) {
 /******/ 		// Check if module is in cache
@@ -54959,7 +54959,7 @@ exports.visitAsync = visitAsync;
 /******/ 			// no module.loaded needed
 /******/ 			exports: {}
 /******/ 		};
-/******/ 	
+/******/
 /******/ 		// Execute the module function
 /******/ 		var threw = true;
 /******/ 		try {
@@ -54968,16 +54968,16 @@ exports.visitAsync = visitAsync;
 /******/ 		} finally {
 /******/ 			if(threw) delete __webpack_module_cache__[moduleId];
 /******/ 		}
-/******/ 	
+/******/
 /******/ 		// Return the exports of the module
 /******/ 		return module.exports;
 /******/ 	}
-/******/ 	
+/******/
 /************************************************************************/
 /******/ 	/* webpack/runtime/compat */
-/******/ 	
+/******/
 /******/ 	if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = __dirname + "/";
-/******/ 	
+/******/
 /************************************************************************/
 var __webpack_exports__ = {};
 // This entry need to be wrapped in an IIFE because it need to be in strict mode.
@@ -55072,12 +55072,15 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async directUpdate(octokit, owner, repo, sha, content) {
         const config = this.config;
-        const imageTag = config.image.split(':').pop() || 'latest';
+        const { scope, imageTag, imageName } = this.getCommitInfo();
+        const message = scope
+            ? `ci(${scope}): update ${imageName} to ${imageTag}`
+            : `ci: update ${imageName} to ${imageTag}`;
         const result = await octokit.repos.createOrUpdateFileContents({
             owner,
             repo,
             path: config.manifestPath,
-            message: `chore: update image to ${imageTag}`,
+            message,
             content: Buffer.from(content).toString('base64'),
             sha,
             branch: config.branch
@@ -55088,8 +55091,13 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async createPullRequest(octokit, owner, repo, sha, content) {
         const config = this.config;
-        const imageTag = config.image.split(':').pop() || 'latest';
-        const branchName = `update-image-${Date.now()}`;
+        const { scope, imageTag, imageName } = this.getCommitInfo();
+        const message = scope
+            ? `ci(${scope}): update ${imageName} to ${imageTag}`
+            : `ci: update ${imageName} to ${imageTag}`;
+        const branchName = scope
+            ? `update-${scope}-${imageTag}`
+            : `update-image-${Date.now()}`;
         // Create new branch
         const { data: ref } = await octokit.git.getRef({
             owner,
@@ -55107,7 +55115,7 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
             owner,
             repo,
             path: config.manifestPath,
-            message: `chore: update image to ${imageTag}`,
+            message,
             content: Buffer.from(content).toString('base64'),
             sha,
             branch: branchName
@@ -55195,6 +55203,26 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
         }
         this.log(`Expected a map for path part '${part.key}' but found ${typeof node}`);
         return false;
+    }
+    getCommitInfo() {
+        const config = this.config;
+        const imageParts = config.image.split(':');
+        const imageTag = imageParts.pop() || 'latest';
+        const imagePath = imageParts.join(':');
+        const imageName = imagePath.split('/').pop() || 'unknown';
+        let scope = '';
+        if (config.yamlPath) {
+            const match = config.yamlPath.match(/\[name=([^\]]+)\]/);
+            if (match)
+                scope = match[1];
+        }
+        if (!scope && config.containerName) {
+            scope = config.containerName;
+        }
+        if (!scope) {
+            scope = config.manifestPath.split('/').pop()?.replace('.yaml', '') || '';
+        }
+        return { scope, imageTag, imageName };
     }
 }
 exports.K8sManifestUpdater = K8sManifestUpdater;

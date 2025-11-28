@@ -1,18 +1,5 @@
 {
-  "name": "@restack/actions",
-  "version": "0.0.0",
-  "private": true,
   "description": "Enterprise-grade GitHub Actions monorepo",
-  "scripts": {
-    "build": "turbo run build",
-    "test": "turbo run test",
-    "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
-    "changeset": "changeset",
-    "version": "changeset version",
-    "release": "turbo run build && changeset publish",
-    "prepare": "husky install"
-  },
   "devDependencies": {
     "@changesets/cli": "^2.29.7",
     "@types/node": "^20.19.25",
@@ -30,5 +17,18 @@
       "eslint --fix"
     ]
   },
-  "packageManager": "pnpm@8.15.1"
+  "name": "@restack/actions",
+  "packageManager": "pnpm@8.15.1",
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "changeset": "changeset",
+    "lint": "turbo run lint",
+    "prepare": "husky install",
+    "release": "turbo run build && changeset publish",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "version": "changeset version"
+  },
+  "version": "0.0.0"
 }

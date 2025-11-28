@@ -3,6 +3,7 @@ import * as github from '@actions/github';
 import { Octokit } from '@octokit/rest';
 export interface ActionConfig {
     token?: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     [key: string]: any;
 }
 export declare abstract class BaseAction {
