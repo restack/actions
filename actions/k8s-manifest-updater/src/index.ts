@@ -109,9 +109,10 @@ export class K8sManifestUpdater extends BaseAction {
     const config = this.config as Config;
     const { scope, imageTag, imageName } = this.getCommitInfo();
 
+    const updateSubject = imageName ? `${imageName} ` : '';
     const message = scope
-      ? `ci(${scope}): update ${imageName} to ${imageTag}`
-      : `ci: update ${imageName} to ${imageTag}`;
+      ? `ci(${scope}): update ${updateSubject}to ${imageTag}`
+      : `ci: update ${updateSubject}to ${imageTag}`;
 
     const result = await octokit.repos.createOrUpdateFileContents({
       owner,
@@ -131,9 +132,10 @@ export class K8sManifestUpdater extends BaseAction {
     const config = this.config as Config;
     const { scope, imageTag, imageName } = this.getCommitInfo();
 
+    const updateSubject = imageName ? `${imageName} ` : '';
     const message = scope
-      ? `ci(${scope}): update ${imageName} to ${imageTag}`
-      : `ci: update ${imageName} to ${imageTag}`;
+      ? `ci(${scope}): update ${updateSubject}to ${imageTag}`
+      : `ci: update ${updateSubject}to ${imageTag}`;
 
     const branchName = scope
       ? `update-${scope}-${imageTag}`
@@ -256,13 +258,13 @@ export class K8sManifestUpdater extends BaseAction {
     return false;
   }
 
-  private getCommitInfo(): { scope: string; imageTag: string; imageName: string } {
+  private getCommitInfo(): { scope: string; imageTag: string; imageName?: string } {
     const config = this.config as Config;
 
     const imageParts = config.image.split(':');
     const imageTag = imageParts.pop() || 'latest';
     const imagePath = imageParts.join(':');
-    const imageName = imagePath.split('/').pop() || 'unknown';
+    const imageName = imagePath.split('/').pop() || undefined;
 
     let scope = '';
     if (config.yamlPath) {
