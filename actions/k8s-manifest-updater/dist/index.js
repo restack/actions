@@ -55072,16 +55072,12 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async directUpdate(octokit, owner, repo, sha, content) {
         const config = this.config;
-        const { scope, imageTag, imageName } = this.getCommitInfo();
-        const updateSubject = imageName ? `${imageName} ` : '';
-        const message = scope
-            ? `ci(${scope}): update ${updateSubject}to ${imageTag}`
-            : `ci: update ${updateSubject}to ${imageTag}`;
+        const { commitMessage } = this.getUpdateMessageParts();
         const result = await octokit.repos.createOrUpdateFileContents({
             owner,
             repo,
             path: config.manifestPath,
-            message,
+            message: commitMessage,
             content: Buffer.from(content).toString('base64'),
             sha,
             branch: config.branch
@@ -55092,11 +55088,7 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async createPullRequest(octokit, owner, repo, sha, content) {
         const config = this.config;
-        const { scope, imageTag, imageName } = this.getCommitInfo();
-        const updateSubject = imageName ? `${imageName} ` : '';
-        const message = scope
-            ? `ci(${scope}): update ${updateSubject}to ${imageTag}`
-            : `ci: update ${updateSubject}to ${imageTag}`;
+        const { scope, imageTag, updateSubject, commitMessage, updateType } = this.getUpdateMessageParts();
         const branchName = scope
             ? `update-${scope}-${imageTag}`
             : `update-image-${Date.now()}`;
@@ -55117,17 +55109,19 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
             owner,
             repo,
             path: config.manifestPath,
-            message,
+            message: commitMessage,
             content: Buffer.from(content).toString('base64'),
             sha,
             branch: branchName
         });
+        const prTitle = `chore: update ${updateSubject}to ${imageTag}`;
+        const prSubject = updateType === 'helm' ? 'Helm chart version' : updateType === 'image' ? 'container image' : 'value';
         // Create PR
         const pr = await octokit.pulls.create({
             owner,
             repo,
-            title: `chore: update image to ${imageTag}`,
-            body: `Automated update of container image to \`${config.image}\``,
+            title: prTitle,
+            body: `Automated update of ${prSubject} to \`${config.image}\``,
             head: branchName,
             base: config.branch
         });
@@ -55225,6 +55219,34 @@ class K8sManifestUpdater extends action_core_1.BaseAction {
             scope = config.manifestPath.split('/').pop()?.replace('.yaml', '') || '';
         }
         return { scope, imageTag, imageName };
+    }
+    getUpdateType() {
+        const config = this.config;
+        const yamlPath = config.yamlPath?.toLowerCase();
+        const nestedYamlPath = config.nestedYamlPath?.toLowerCase();
+        if (yamlPath?.includes('targetrevision')) {
+            return 'helm';
+        }
+        if (!config.yamlPath || config.containerName) {
+            return 'image';
+        }
+        if (nestedYamlPath) {
+            return 'image';
+        }
+        if (yamlPath?.includes('image')) {
+            return 'image';
+        }
+        return undefined;
+    }
+    getUpdateMessageParts() {
+        const { scope, imageTag, imageName } = this.getCommitInfo();
+        const updateType = this.getUpdateType();
+        const subjectParts = [updateType, imageName].filter(Boolean).join(' ');
+        const updateSubject = subjectParts ? `${subjectParts} ` : '';
+        const commitMessage = scope
+            ? `ci(${scope}): update ${updateSubject}to ${imageTag}`
+            : `ci: update ${updateSubject}to ${imageTag}`;
+        return { scope, imageTag, updateSubject, commitMessage, updateType, imageName };
     }
 }
 exports.K8sManifestUpdater = K8sManifestUpdater;

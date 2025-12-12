@@ -23,5 +23,7 @@ export declare class K8sManifestUpdater extends BaseAction {
     private updateYamlPath;
     private traverseAndSet;
     private getCommitInfo;
+    private getUpdateType;
+    private getUpdateMessageParts;
 }
 export {};

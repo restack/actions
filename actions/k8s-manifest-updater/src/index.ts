@@ -107,18 +107,13 @@ export class K8sManifestUpdater extends BaseAction {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async directUpdate(octokit: any, owner: string, repo: string, sha: string, content: string) {
     const config = this.config as Config;
-    const { scope, imageTag, imageName } = this.getCommitInfo();
-
-    const updateSubject = imageName ? `${imageName} ` : '';
-    const message = scope
-      ? `ci(${scope}): update ${updateSubject}to ${imageTag}`
-      : `ci: update ${updateSubject}to ${imageTag}`;
+    const { commitMessage } = this.getUpdateMessageParts();
 
     const result = await octokit.repos.createOrUpdateFileContents({
       owner,
       repo,
       path: config.manifestPath,
-      message,
+      message: commitMessage,
       content: Buffer.from(content).toString('base64'),
       sha,
       branch: config.branch
@@ -130,12 +125,7 @@ export class K8sManifestUpdater extends BaseAction {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async createPullRequest(octokit: any, owner: string, repo: string, sha: string, content: string) {
     const config = this.config as Config;
-    const { scope, imageTag, imageName } = this.getCommitInfo();
-
-    const updateSubject = imageName ? `${imageName} ` : '';
-    const message = scope
-      ? `ci(${scope}): update ${updateSubject}to ${imageTag}`
-      : `ci: update ${updateSubject}to ${imageTag}`;
+    const { scope, imageTag, updateSubject, commitMessage, updateType } = this.getUpdateMessageParts();
 
     const branchName = scope
       ? `update-${scope}-${imageTag}`
@@ -160,18 +150,22 @@ export class K8sManifestUpdater extends BaseAction {
       owner,
       repo,
       path: config.manifestPath,
-      message,
+      message: commitMessage,
       content: Buffer.from(content).toString('base64'),
       sha,
       branch: branchName
     });
 
+    const prTitle = `chore: update ${updateSubject}to ${imageTag}`;
+    const prSubject =
+      updateType === 'helm' ? 'Helm chart version' : updateType === 'image' ? 'container image' : 'value';
+
     // Create PR
     const pr = await octokit.pulls.create({
       owner,
       repo,
-      title: `chore: update image to ${imageTag}`,
-      body: `Automated update of container image to \`${config.image}\``,
+      title: prTitle,
+      body: `Automated update of ${prSubject} to \`${config.image}\``,
       head: branchName,
       base: config.branch
     });
@@ -281,6 +275,51 @@ export class K8sManifestUpdater extends BaseAction {
     }
 
     return { scope, imageTag, imageName };
+  }
+
+  private getUpdateType(): 'image' | 'helm' | undefined {
+    const config = this.config as Config;
+    const yamlPath = config.yamlPath?.toLowerCase();
+    const nestedYamlPath = config.nestedYamlPath?.toLowerCase();
+
+    if (yamlPath?.includes('targetrevision')) {
+      return 'helm';
+    }
+
+    if (!config.yamlPath || config.containerName) {
+      return 'image';
+    }
+
+    if (nestedYamlPath) {
+      return 'image';
+    }
+
+    if (yamlPath?.includes('image')) {
+      return 'image';
+    }
+
+    return undefined;
+  }
+
+  private getUpdateMessageParts(): {
+    scope: string;
+    imageTag: string;
+    updateSubject: string;
+    commitMessage: string;
+    updateType?: 'image' | 'helm';
+    imageName?: string;
+  } {
+    const { scope, imageTag, imageName } = this.getCommitInfo();
+    const updateType = this.getUpdateType();
+
+    const subjectParts = [updateType, imageName].filter(Boolean).join(' ');
+    const updateSubject = subjectParts ? `${subjectParts} ` : '';
+
+    const commitMessage = scope
+      ? `ci(${scope}): update ${updateSubject}to ${imageTag}`
+      : `ci: update ${updateSubject}to ${imageTag}`;
+
+    return { scope, imageTag, updateSubject, commitMessage, updateType, imageName };
   }
 }
 

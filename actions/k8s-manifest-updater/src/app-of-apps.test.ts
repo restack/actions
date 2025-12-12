@@ -1,10 +1,61 @@
 import { K8sManifestUpdater } from './index';
 import { parseDocument } from 'yaml';
 
+type UpdaterConfig = {
+  appId: string;
+  privateKey: string;
+  installationId?: string;
+  image: string;
+  yamlPath?: string;
+  nestedYamlPath?: string;
+  containerName?: string;
+  manifestRepo: string;
+  manifestPath: string;
+  branch: string;
+  createPr: boolean;
+};
+
+type PrivateUpdater = {
+  updateYamlPath: (
+    doc: ReturnType<typeof parseDocument>,
+    path: string,
+    newValue: string,
+    nestedPath?: string
+  ) => boolean;
+  directUpdate: (
+    octokit: {
+      repos: {
+        createOrUpdateFileContents: jest.Mock<Promise<{ data: { commit: { sha: string } } }>, [unknown]>;
+      };
+    },
+    owner: string,
+    repo: string,
+    sha: string,
+    content: string
+  ) => Promise<void>;
+};
+
+const createUpdater = (overrides: Partial<UpdaterConfig> = {}): PrivateUpdater => {
+  const baseConfig: UpdaterConfig = {
+    appId: '1',
+    privateKey: 'key',
+    image: 'image:tag',
+    manifestRepo: 'owner/repo',
+    manifestPath: 'manifest.yaml',
+    branch: 'main',
+    createPr: false
+  };
+
+  return new K8sManifestUpdater({ ...baseConfig, ...overrides }) as unknown as PrivateUpdater;
+};
+
 // Mock dependencies
 jest.mock('@restack/action-core', () => ({
   BaseAction: class {
-    constructor() { }
+    protected config: unknown;
+    constructor(config: unknown) {
+      this.config = config;
+    }
     log() { }
     handleError() { }
   },
@@ -49,13 +100,11 @@ apps:
                 image: harbor.home.lab/restack/actions-runner:latest
                 imagePullPolicy: Always
 `;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updater = new K8sManifestUpdater({} as any);
+    const updater = createUpdater();
     const doc = parseDocument(manifest);
 
     // Access private method
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updated = (updater as any).updateYamlPath(
+    const updated = updater.updateYamlPath(
       doc,
       'apps[name=gha-runner-scale-set].helm.values',
       'harbor.home.lab/restack/actions-runner:v2',
@@ -111,13 +160,11 @@ apps:
                         imagePullPolicy: Always
 `;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updater = new K8sManifestUpdater({} as any);
+    const updater = createUpdater();
     const doc = parseDocument(manifest);
 
     // Access private method
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updated = (updater as any).updateYamlPath(
+    const updated = updater.updateYamlPath(
       doc,
       'apps[name=landing].source.helm.values',
       'harbor.home.lab/restack/www:main-TEST',
@@ -128,5 +175,50 @@ apps:
 
     const newManifest = doc.toString();
     expect(newManifest).toContain('image: harbor.home.lab/restack/www:main-TEST');
+  });
+
+  it('should mark commit message as image update when nested yaml path is provided', async () => {
+    const updater = createUpdater({
+      image: 'restack/deepfx:main-a6d6193',
+      yamlPath: 'apps[name=deepfx].source.helm.values',
+      nestedYamlPath: 'apps[name=deepfx].image.tag',
+      manifestPath: 'platform/stacks/05-workloads/overlays/home/deepfx.yaml'
+    });
+
+    const mockOctokit = {
+      repos: {
+        createOrUpdateFileContents: jest.fn().mockResolvedValue({ data: { commit: { sha: 'sha' } } })
+      }
+    };
+
+    await updater.directUpdate(mockOctokit, 'owner', 'repo', 'file-sha', 'content');
+
+    expect(mockOctokit.repos.createOrUpdateFileContents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'ci(deepfx): update image deepfx to main-a6d6193'
+      })
+    );
+  });
+
+  it('should mark commit message as helm update when targetRevision is updated', async () => {
+    const updater = createUpdater({
+      image: 'main-a6d6193',
+      yamlPath: 'apps[name=deepfx].source.targetRevision',
+      manifestPath: 'platform/stacks/05-workloads/overlays/home/deepfx.yaml'
+    });
+
+    const mockOctokit = {
+      repos: {
+        createOrUpdateFileContents: jest.fn().mockResolvedValue({ data: { commit: { sha: 'sha' } } })
+      }
+    };
+
+    await updater.directUpdate(mockOctokit, 'owner', 'repo', 'file-sha', 'content');
+
+    expect(mockOctokit.repos.createOrUpdateFileContents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'ci(deepfx): update helm to main-a6d6193'
+      })
+    );
   });
 });
