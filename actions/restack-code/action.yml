@@ -1,0 +1,131 @@
+name: 'restack-code'
+description: 'Interact with a local LLM to analyze or modify repository files and optionally commit or open a PR.'
+author: 'restack'
+branding:
+  icon: 'cpu'
+  color: 'blue'
+
+inputs:
+  # LLM Configuration
+  llm_url:
+    description: 'Full URL of the local LLM endpoint (e.g. http://localhost:8080/v1/chat/completions)'
+    required: true
+  api_key:
+    description: 'API key or token for the LLM (if required). If not set, no Authorization header will be sent.'
+    required: false
+  model:
+    description: 'Model name to request from the LLM (if applicable)'
+    required: false
+    default: 'default'
+  format:
+    description: 'Message format: "auto" (detect from URL), "chat" (OpenAI chat completions), or "raw" (simple prompt)'
+    required: false
+    default: 'auto'
+  max_tokens:
+    description: 'Maximum tokens or response length hint for the LLM.'
+    required: false
+  timeout_ms:
+    description: 'Timeout in milliseconds for LLM requests. Default 300000 (5 minutes) for large local models.'
+    required: false
+    default: '300000'
+  temperature:
+    description: 'Temperature for LLM sampling. Default 0.1 for deterministic output.'
+    required: false
+    default: '0.1'
+
+  # Prompt Configuration
+  prompt:
+    description: 'Prompt to send to the LLM. Can include instructions about changes to make.'
+    required: false
+  prompt_file:
+    description: 'Path to a file in the repo to use as the prompt. Used if `prompt` is not provided.'
+    required: false
+
+  # File Context
+  files:
+    description: 'Glob or comma-separated list of files to include in the payload (e.g. src/**/*.ts).'
+    required: false
+  include_patch:
+    description: 'If "true", include a unified diff (git patch) of changed files for context.'
+    required: false
+    default: 'false'
+
+  # Issue/PR Context Injection
+  issue_number:
+    description: 'Issue number to include in context and for comment posting.'
+    required: false
+  issue_title:
+    description: 'Issue title to include in context.'
+    required: false
+  issue_body:
+    description: 'Issue body/description to include in context.'
+    required: false
+  pr_number:
+    description: 'PR number to include in context.'
+    required: false
+  pr_title_context:
+    description: 'PR title to include in context (use pr_title for the created PR title).'
+    required: false
+  pr_body_context:
+    description: 'PR body to include in context (use pr_body for the created PR body).'
+    required: false
+  comment_body:
+    description: 'Current comment text to include in context (e.g. from issue_comment event).'
+    required: false
+
+  # Commit/PR Options
+  commit:
+    description: 'If "true", apply changes by committing to the repository. Supports JSON actions or unified diff.'
+    required: false
+    default: 'false'
+  commit_message:
+    description: 'Commit message used when `commit` is true. Can be overridden by LLM JSON response.'
+    required: false
+    default: 'Apply changes suggested by restack-code'
+  create_pr:
+    description: 'If "true" and `commit` is true, create a Pull Request instead of pushing directly.'
+    required: false
+    default: 'false'
+  pr_title:
+    description: 'Title for the PR when `create_pr` is true. Can be overridden by LLM JSON response.'
+    required: false
+    default: 'chore: Apply LLM suggested changes'
+  pr_body:
+    description: 'Body for the PR when `create_pr` is true. Can be overridden by LLM JSON response.'
+    required: false
+    default: 'This PR contains changes suggested by restack-code.'
+  branch:
+    description: 'Branch to push changes to when creating a commit or PR.'
+    required: false
+    default: 'restack/llm-suggestions'
+  base_branch:
+    description: 'Base branch for PR creation (e.g. main, master).'
+    required: false
+    default: 'main'
+  bot_name:
+    description: 'Name used for git commits and comments (e.g. "qwen3" becomes "qwen3[bot]").'
+    required: false
+    default: 'restack-code'
+  post_comment:
+    description: 'If "true", post a comment on the issue with the LLM analysis/result.'
+    required: false
+    default: 'false'
+
+  # Authentication
+  github_token:
+    description: 'GitHub token for pushing commits / creating PRs / posting comments. Defaults to GITHUB_TOKEN env var.'
+    required: false
+
+outputs:
+  llm_response:
+    description: 'Raw LLM response (string)'
+  summary:
+    description: 'Short summary of the action result'
+  commit_sha:
+    description: 'Commit SHA if a commit was created'
+  pr_url:
+    description: 'PR URL if a PR was created'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
