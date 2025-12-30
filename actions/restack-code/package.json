@@ -5,6 +5,7 @@
   "private": true,
   "dependencies": {
     "@restack/action-core": "workspace:*",
+    "@restack/github-app-client": "workspace:*",
     "@actions/core": "^1.10.1",
     "@actions/github": "^6.0.0",
     "@octokit/rest": "^20.0.2",

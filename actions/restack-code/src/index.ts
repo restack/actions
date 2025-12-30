@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import { Octokit } from '@octokit/rest';
+import { GitHubAppClient } from '@restack/github-app-client';
 import { glob } from 'glob';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -13,6 +14,37 @@ import {
   resolveRepoFilePath,
   tryParseActionResponse,
 } from './utils';
+
+/**
+ * Get Octokit instance from either GitHub token or GitHub App credentials
+ */
+async function getOctokit(inputs: {
+  githubToken?: string;
+  appId?: string;
+  privateKey?: string;
+  installationId?: string;
+}): Promise<Octokit | null> {
+  const { githubToken, appId, privateKey, installationId } = inputs;
+
+  // Prefer GitHub App authentication if provided
+  if (appId && privateKey) {
+    core.info('Using GitHub App authentication');
+    const appClient = new GitHubAppClient({
+      appId,
+      privateKey,
+      installationId,
+    });
+    return await appClient.getOctokit();
+  }
+
+  // Fall back to token authentication
+  if (githubToken) {
+    core.info('Using GitHub token authentication');
+    return new Octokit({ auth: githubToken });
+  }
+
+  return null;
+}
 
 type FilesMap = Record<string, string>;
 
@@ -198,6 +230,11 @@ async function run(): Promise<void> {
     const botName = core.getInput('bot_name') || 'restack-code';
     const githubToken = core.getInput('github_token') || process.env.GITHUB_TOKEN;
 
+    // GitHub App authentication inputs
+    const appId = core.getInput('app_id') || undefined;
+    const privateKey = core.getInput('private_key') || undefined;
+    const installationId = core.getInput('installation_id') || undefined;
+
     // Context injection inputs
     const issueNumberInput = core.getInput('issue_number');
     const issueNumber = issueNumberInput ? Number(issueNumberInput) : undefined;
@@ -274,9 +311,9 @@ async function run(): Promise<void> {
     core.info('Received response from LLM.');
     core.setOutput('llm_response', llmResponse);
 
-    // Initialize octokit if we have a token
+    // Initialize octokit with either GitHub App or token authentication
     const [owner, repoName] = repo.split('/');
-    const octokit = githubToken ? new Octokit({ auth: githubToken }) : null;
+    const octokit = await getOctokit({ githubToken, appId, privateKey, installationId });
 
     // Try to parse as structured JSON response first
     const actionResponse = tryParseActionResponse(llmResponse);

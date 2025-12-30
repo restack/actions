@@ -111,9 +111,20 @@ inputs:
     required: false
     default: 'false'
 
-  # Authentication
+  # Authentication (choose either github_token OR app_id/private_key)
   github_token:
     description: 'GitHub token for pushing commits / creating PRs / posting comments. Defaults to GITHUB_TOKEN env var.'
+    required: false
+
+  # GitHub App Authentication (alternative to github_token)
+  app_id:
+    description: 'GitHub App ID for authentication. Use with private_key instead of github_token.'
+    required: false
+  private_key:
+    description: 'GitHub App private key (PEM format). Use with app_id instead of github_token.'
+    required: false
+  installation_id:
+    description: 'GitHub App installation ID. If not provided, will be auto-detected from the repository.'
     required: false
 
 outputs:
