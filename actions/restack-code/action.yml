@@ -73,6 +73,23 @@ inputs:
     description: 'Current comment text to include in context (e.g. from issue_comment event).'
     required: false
 
+  # Event Context (for handling different GitHub event types)
+  event_name:
+    description: 'GitHub event name (e.g. issues, issue_comment, pull_request_review_comment). Auto-detected from GITHUB_EVENT_NAME if not provided.'
+    required: false
+  review_comment_path:
+    description: 'File path of the review comment (for pull_request_review_comment events).'
+    required: false
+  review_comment_line:
+    description: 'Line number of the review comment (for pull_request_review_comment events).'
+    required: false
+  pr_head_ref:
+    description: 'PR head branch ref (for pull_request_review_comment events). Used to checkout the correct branch.'
+    required: false
+  pr_base_ref:
+    description: 'PR base branch ref (for pull_request_review_comment events). Used as base for PR creation.'
+    required: false
+
   # Commit/PR Options
   commit:
     description: 'If "true", apply changes by committing to the repository. Supports JSON actions or unified diff.'

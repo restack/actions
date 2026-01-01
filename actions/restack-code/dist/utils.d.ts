@@ -21,6 +21,9 @@ export declare function buildContext(inputs: {
     prBody?: string;
     commentBody?: string;
     repo: string;
+    eventName?: string;
+    reviewCommentPath?: string;
+    reviewCommentLine?: string;
 }): string;
 export declare function resolveRepoFilePath(repoRoot: string, actionPath: string): {
     resolvedPath: string;

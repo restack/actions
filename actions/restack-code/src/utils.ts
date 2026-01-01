@@ -52,6 +52,9 @@ export function buildContext(inputs: {
   prBody?: string;
   commentBody?: string;
   repo: string;
+  eventName?: string;
+  reviewCommentPath?: string;
+  reviewCommentLine?: string;
 }): string {
   const parts: string[] = [];
 
@@ -72,7 +75,17 @@ export function buildContext(inputs: {
   }
 
   if (inputs.commentBody) {
-    parts.push(`\nCurrent Comment/Request:\n${inputs.commentBody}`);
+    // For PR review comments, include file/line context
+    if (inputs.eventName === 'pull_request_review_comment' && inputs.reviewCommentPath) {
+      let reviewContext = `\nReview Comment on ${inputs.reviewCommentPath}`;
+      if (inputs.reviewCommentLine) {
+        reviewContext += ` (line ${inputs.reviewCommentLine})`;
+      }
+      reviewContext += `:\n${inputs.commentBody}`;
+      parts.push(reviewContext);
+    } else {
+      parts.push(`\nCurrent Comment/Request:\n${inputs.commentBody}`);
+    }
   }
 
   return parts.join('\n');

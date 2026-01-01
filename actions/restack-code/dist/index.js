@@ -50481,6 +50481,17 @@ async function run() {
         const prBodyInput = core.getInput('pr_body_context') || undefined;
         const commentBody = core.getInput('comment_body') || undefined;
         const postCommentOnComplete = core.getInput('post_comment') === 'true';
+        // Event context inputs
+        const eventName = core.getInput('event_name') || process.env.GITHUB_EVENT_NAME || '';
+        const reviewCommentPath = core.getInput('review_comment_path') || undefined;
+        const reviewCommentLine = core.getInput('review_comment_line') || undefined;
+        const prHeadRef = core.getInput('pr_head_ref') || undefined;
+        const prBaseRef = core.getInput('pr_base_ref') || undefined;
+        // For pull_request_review_comment, auto-adjust settings
+        const isPRReviewComment = eventName === 'pull_request_review_comment';
+        if (isPRReviewComment) {
+            core.info('Detected pull_request_review_comment event - will push to existing PR branch');
+        }
         // Build prompt
         let prompt = promptInput || '';
         if (promptFile) {
@@ -50532,6 +50543,9 @@ async function run() {
             prBody: prBodyInput,
             commentBody,
             repo,
+            eventName,
+            reviewCommentPath,
+            reviewCommentLine,
         });
         const filesHeader = Object.keys(filesMap).length > 0 ? `\nFiles included: ${Object.keys(filesMap).length}\n` : '';
         const finalPrompt = contextHeader + filesHeader + '\n' + prompt;
@@ -50559,30 +50573,52 @@ async function run() {
                 finalCommitMessage = actionResponse.commit_message || commitMessage;
                 finalPrTitle = actionResponse.pr_title || prTitle;
                 finalPrBody = actionResponse.pr_body || prBody;
-                // Check for existing branch and handle accordingly
-                const existingPR = octokit ? await findExistingPR(octokit, owner, repoName, branch) : null;
-                if (existingPR) {
-                    core.info(`Found existing PR: ${existingPR.url}`);
-                    // Fetch and checkout existing branch
+                // Determine the target branch
+                // For PR review comments, use the PR's head branch; otherwise use the configured branch
+                const targetBranch = isPRReviewComment && prHeadRef ? prHeadRef : branch;
+                const targetBaseBranch = isPRReviewComment && prBaseRef ? prBaseRef : baseBranch;
+                // For PR review comments, we're already on the right branch (checked out by workflow)
+                // Just need to ensure we're on the correct branch
+                if (isPRReviewComment && prHeadRef) {
+                    core.info(`PR review comment: using existing PR branch '${prHeadRef}'`);
                     try {
-                        await git.fetch(['origin', branch]);
-                        await git.checkout(branch);
-                        await git.pull('origin', branch, ['--rebase']);
+                        // Ensure we're on the PR branch
+                        const currentBranch = (await git.branch()).current;
+                        if (currentBranch !== prHeadRef) {
+                            await git.fetch(['origin', prHeadRef]);
+                            await git.checkout(prHeadRef);
+                        }
                     }
-                    catch {
-                        core.warning(`Failed to checkout existing branch, will create new`);
-                        await git.checkoutLocalBranch(branch);
+                    catch (e) {
+                        core.warning(`Failed to checkout PR branch ${prHeadRef}: ${e}`);
                     }
                 }
                 else {
-                    // Create new branch, force delete if exists locally
-                    try {
-                        await git.branch(['-D', branch]);
+                    // Check for existing branch and handle accordingly
+                    const existingPR = octokit ? await findExistingPR(octokit, owner, repoName, targetBranch) : null;
+                    if (existingPR) {
+                        core.info(`Found existing PR: ${existingPR.url}`);
+                        // Fetch and checkout existing branch
+                        try {
+                            await git.fetch(['origin', targetBranch]);
+                            await git.checkout(targetBranch);
+                            await git.pull('origin', targetBranch, ['--rebase']);
+                        }
+                        catch {
+                            core.warning(`Failed to checkout existing branch, will create new`);
+                            await git.checkoutLocalBranch(targetBranch);
+                        }
                     }
-                    catch {
-                        // Branch doesn't exist locally, that's fine
+                    else {
+                        // Create new branch, force delete if exists locally
+                        try {
+                            await git.branch(['-D', targetBranch]);
+                        }
+                        catch {
+                            // Branch doesn't exist locally, that's fine
+                        }
+                        await git.checkoutLocalBranch(targetBranch);
                     }
-                    await git.checkoutLocalBranch(branch);
                 }
                 // Execute file actions
                 const changesCount = await executeFileActions(actionResponse.actions, git, repoRoot);
@@ -50591,25 +50627,27 @@ async function run() {
                     core.warning('File actions were executed but produced no staged changes.');
                 }
                 if (hasChanges) {
-                    // Add issue reference to commit message
-                    const issueRef = issueNumber ? `\n\nCloses #${issueNumber}` : '';
+                    // Add issue reference to commit message (skip for PR review comments as it's already linked)
+                    const issueRef = issueNumber && !isPRReviewComment ? `\n\nCloses #${issueNumber}` : '';
                     const fullCommitMessage = `${finalCommitMessage}${issueRef}\n\n✨ Generated by ${botName}`;
                     await git.commit(fullCommitMessage);
                     // Force push to handle diverged branches
                     try {
-                        await git.push('origin', branch, ['-u', '--force-with-lease']);
+                        await git.push('origin', targetBranch, ['-u', '--force-with-lease']);
                     }
                     catch {
                         // If force-with-lease fails, try regular force (for new branches)
-                        await git.push('origin', branch, ['-u', '-f']);
+                        await git.push('origin', targetBranch, ['-u', '-f']);
                     }
                     const sha = await git.revparse(['HEAD']);
                     core.setOutput('commit_sha', sha);
                     core.info(`Committed changes: ${sha}`);
                 }
                 let prUrl = '';
-                if (hasChanges && createPr && octokit) {
-                    const existingPRCheck = await findExistingPR(octokit, owner, repoName, branch);
+                // For PR review comments, skip PR creation (we're pushing to existing PR branch)
+                const shouldCreatePR = createPr && !isPRReviewComment;
+                if (hasChanges && shouldCreatePR && octokit) {
+                    const existingPRCheck = await findExistingPR(octokit, owner, repoName, targetBranch);
                     if (existingPRCheck) {
                         prUrl = existingPRCheck.url;
                         core.setOutput('pr_url', prUrl);
@@ -50624,8 +50662,8 @@ async function run() {
                                 repo: repoName,
                                 title: finalPrTitle,
                                 body: `## Analysis\n\n${analysis}\n\n## Changes\n\n${finalPrBody}${issueRef}\n\n---\n✨ *Generated by ${botName}*`,
-                                head: branch,
-                                base: baseBranch,
+                                head: targetBranch,
+                                base: targetBaseBranch,
                             });
                             prUrl = pr.data.html_url;
                             core.setOutput('pr_url', prUrl);
@@ -50638,6 +50676,9 @@ async function run() {
                             core.setOutput('summary', 'Applied file actions but failed to create PR.');
                         }
                     }
+                }
+                else if (hasChanges && isPRReviewComment) {
+                    core.setOutput('summary', 'Applied file actions and pushed to existing PR branch.');
                 }
                 else if (hasChanges) {
                     core.setOutput('summary', 'Applied file actions and pushed commit.');
@@ -51026,7 +51067,18 @@ function buildContext(inputs) {
         }
     }
     if (inputs.commentBody) {
-        parts.push(`\nCurrent Comment/Request:\n${inputs.commentBody}`);
+        // For PR review comments, include file/line context
+        if (inputs.eventName === 'pull_request_review_comment' && inputs.reviewCommentPath) {
+            let reviewContext = `\nReview Comment on ${inputs.reviewCommentPath}`;
+            if (inputs.reviewCommentLine) {
+                reviewContext += ` (line ${inputs.reviewCommentLine})`;
+            }
+            reviewContext += `:\n${inputs.commentBody}`;
+            parts.push(reviewContext);
+        }
+        else {
+            parts.push(`\nCurrent Comment/Request:\n${inputs.commentBody}`);
+        }
     }
     return parts.join('\n');
 }
