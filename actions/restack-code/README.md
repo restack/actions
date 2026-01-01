@@ -1,94 +1,235 @@
 # restack-code
 
-A lightweight GitHub Action that talks to a local LLM endpoint to analyze repository files and optionally apply suggested changes. The action is designed to be flexible with different local LLMs (HTTP JSON endpoints) and to follow a simple contract:
+A GitHub Action that interacts with a local LLM endpoint to analyze repository files and optionally apply suggested changes. Designed for flexible integration with various LLM backends (OpenAI-compatible, local models, etc.).
 
-- Send a prompt and an optional set of files (or a git patch) to the LLM.
-- Receive a response; if the response is a unified diff (git patch), optionally apply it, commit, push, and open a PR.
+## Features
 
-Files of interest:
-- [`actions/restack-code/action.yml`](actions/restack-code/action.yml:1)
-- [`actions/restack-code/src/index.ts`](actions/restack-code/src/index.ts:1)
-- [`actions/restack-code/src/llm-client.ts`](actions/restack-code/src/llm-client.ts:1)
-- [`actions/restack-code/package.json`](actions/restack-code/package.json:1)
-- [`actions/restack-code/tsconfig.json`](actions/restack-code/tsconfig.json:1)
+- **Multiple Response Formats**: Supports JSON-based file actions or unified diff (git patch)
+- **Commit & PR Automation**: Automatically commit changes and create Pull Requests
+- **GitHub App Authentication**: Use GitHub App credentials for enhanced permissions
+- **Issue/PR Context Injection**: Automatically include issue/PR context in prompts
+- **PR Review Comment Support**: Respond to code review comments and push fixes directly to PR branches
+- **Comment Posting**: Post analysis results as comments on issues/PRs
 
-Quick concepts
-- llm_url: full URL where the action will POST a JSON payload. The payload contains { model, prompt, files, max_tokens }.
-- files: a glob or comma-separated globs of repository files to include in the payload.
-- include_patch: when true the action will include a git diff (HEAD vs working tree) in the payload as `__git_diff__`.
-- Commit flow: the LLM should return a unified diff (git patch). If commit=true, the action will apply the patch, commit, push and (optionally) create a PR.
-
-Build
-1. From the repository root:
-   - Install dependencies: `just install` (monorepo) or `pnpm install`
-2. Build this action:
-   - cd into the action folder and run the build script:
-     - `cd actions/restack-code && pnpm build`
-   The build uses `@vercel/ncc` and generates `dist/index.js` referenced by the action metadata: see [`actions/restack-code/action.yml`](actions/restack-code/action.yml:1).
-
-Inputs (see full list in action metadata)
-- `llm_url` (required): Full URL to send prompt requests to (e.g. `http://localhost:8080/v1/generate`).
-- `api_key` (optional): Bearer token for the LLM.
-- `model` (optional): Model identifier (if the LLM supports it).
-- `prompt` / `prompt_file` (optional): Prompt text or a path to a file in the repo used as the prompt.
-- `files` (optional): Glob or comma-separated globs of files to include in the payload (e.g. `src/**/*.ts,package.json`).
-- `include_patch` (optional; default `false`): If `true`, the current git diff for the selected files will be added as `__git_diff__`.
-- `commit` (optional; default `false`): If `true`, the action will attempt to apply a returned patch and commit it.
-- `create_pr` (optional; default `false`): If `true` and `commit` is true, create a PR from the branch.
-- `github_token` (optional): Token used to push and create PRs (falls back to GITHUB_TOKEN).
-
-Expected LLM response shapes
-- The action is tolerant and will attempt to parse common response formats, but for automated application you should return a unified diff (git patch) like produced by `git diff`:
-  - Example patch snippet:
-    diff --git a/src/foo.ts b/src/foo.ts
-    index 123..456 100644
-    --- a/src/foo.ts
-    +++ b/src/foo.ts
-    @@ -1,6 +1,6 @@
-    -old line
-    +new line
-
-- If the LLM returns natural language suggestions instead of a patch, the action will set outputs with the raw LLM response and skip applying changes (unless `commit` is requested and a patch-like string is present).
-
-Example workflow
-- A simple GitHub workflow that runs the action on push or PR and asks a local LLM for suggestions:
+## Quick Start
 
 ```yaml
-name: LLM Suggestions
+- uses: restack/actions/actions/restack-code@v1
+  with:
+    llm_url: 'http://localhost:8080/v1/chat/completions'
+    model: 'local-model'
+    prompt: 'Analyze the code and suggest improvements'
+    commit: 'true'
+    create_pr: 'true'
+    github_token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+## Inputs
+
+### LLM Configuration
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `llm_url` | Yes | - | Full URL of the LLM endpoint (e.g., `http://localhost:8080/v1/chat/completions`) |
+| `api_key` | No | - | API key for the LLM (if required) |
+| `model` | No | `default` | Model name to request from the LLM |
+| `format` | No | `auto` | Message format: `auto`, `chat` (OpenAI), or `raw` |
+| `max_tokens` | No | - | Maximum tokens for LLM response |
+| `timeout_ms` | No | `300000` | Timeout in milliseconds (default: 5 minutes) |
+| `temperature` | No | `0.1` | Temperature for LLM sampling |
+
+### Prompt Configuration
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `prompt` | No | - | Prompt text to send to the LLM |
+| `prompt_file` | No | - | Path to a file to use as the prompt |
+
+### File Context
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `files` | No | - | Glob or comma-separated list of files to include |
+| `include_patch` | No | `false` | Include git diff of changed files |
+
+### Issue/PR Context
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `issue_number` | No | - | Issue number to include in context |
+| `issue_title` | No | - | Issue title to include in context |
+| `issue_body` | No | - | Issue body to include in context |
+| `pr_number` | No | - | PR number to include in context |
+| `pr_title_context` | No | - | PR title to include in context |
+| `pr_body_context` | No | - | PR body to include in context |
+| `comment_body` | No | - | Comment text to include in context |
+
+### Event Context (PR Review Comments)
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `event_name` | No | Auto-detected | GitHub event name (e.g., `pull_request_review_comment`) |
+| `review_comment_path` | No | - | File path of the review comment |
+| `review_comment_line` | No | - | Line number of the review comment |
+| `pr_head_ref` | No | - | PR head branch ref (for pushing to existing PR) |
+| `pr_base_ref` | No | - | PR base branch ref |
+
+### Commit/PR Options
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `commit` | No | `false` | Apply changes and commit |
+| `commit_message` | No | `Apply changes...` | Commit message |
+| `create_pr` | No | `false` | Create a Pull Request |
+| `pr_title` | No | `chore: Apply...` | PR title |
+| `pr_body` | No | - | PR body |
+| `branch` | No | `restack/llm-suggestions` | Branch name for commits |
+| `base_branch` | No | `main` | Base branch for PR creation |
+| `bot_name` | No | `restack-code` | Name used for git commits |
+| `post_comment` | No | `false` | Post a comment on the issue with results |
+
+### Authentication
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `github_token` | No | `GITHUB_TOKEN` | GitHub token for API calls |
+| `app_id` | No | - | GitHub App ID (alternative to token) |
+| `private_key` | No | - | GitHub App private key |
+| `installation_id` | No | - | GitHub App installation ID |
+
+## Outputs
+
+| Output | Description |
+|--------|-------------|
+| `llm_response` | Raw LLM response text |
+| `summary` | Short summary of the action result |
+| `commit_sha` | Commit SHA if a commit was created |
+| `pr_url` | PR URL if a PR was created |
+
+## LLM Response Formats
+
+### JSON Actions (Recommended)
+
+The LLM can return a JSON object with file actions:
+
+```json
+{
+  "analysis": "Brief analysis of the changes",
+  "actions": [
+    {"type": "create", "path": "src/new-file.ts", "content": "..."},
+    {"type": "modify", "path": "src/existing.ts", "content": "..."},
+    {"type": "delete", "path": "src/old-file.ts"}
+  ],
+  "commit_message": "feat: add new feature",
+  "pr_title": "Add new feature",
+  "pr_body": "This PR adds..."
+}
+```
+
+### Unified Diff
+
+The LLM can also return a unified diff (git patch):
+
+```diff
+diff --git a/src/foo.ts b/src/foo.ts
+--- a/src/foo.ts
++++ b/src/foo.ts
+@@ -1,3 +1,3 @@
+-old line
++new line
+```
+
+## Example Workflows
+
+### Issue Handler with Local LLM
+
+```yaml
+name: Issue Handler
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-  push:
-    branches: [main]
+  issues:
+    types: [labeled]
 
 jobs:
-  suggest:
+  handle:
+    if: contains(github.event.issue.labels.*.name, 'ai-fix')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run local LLM action
-        uses: ./actions/restack-code
+      - uses: restack/actions/actions/restack-code@v1
         with:
-          llm_url: 'http://localhost:8080/v1/generate'
-          model: 'local-model'
-          prompt_file: '.github/llm/prompts/suggest_changes.txt'
-          files: 'src/**/*.ts,package.json'
-          include_patch: 'true'
+          llm_url: 'http://llm.example.com/v1/chat/completions'
+          model: 'qwen3-coder'
+          issue_number: ${{ github.event.issue.number }}
+          issue_title: ${{ github.event.issue.title }}
+          issue_body: ${{ github.event.issue.body }}
           commit: 'true'
           create_pr: 'true'
-          github_token: '${{ secrets.GITHUB_TOKEN }}'
+          post_comment: 'true'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-Notes and best practices
-- Local LLM endpoint: this action assumes your LLM is reachable from the runner. For self-hosted or local-only LLMs running on the same network, ensure the runner has network access (or use self-hosted runners).
-- Security: be cautious when allowing arbitrary LLM-driven commits; restrict who can trigger the action or require PR reviews.
-- Testing: before enabling `commit=true` on important branches, run with `commit=false` to inspect the raw LLM responses via action output (`llm_response`).
-- Extensibility: the LLM client (`src/llm-client.ts`) is intentionally minimal; adapt it for specific LLM APIs (Anthropic, OpenAI, or other local endpoints) as needed.
+### PR Review Comment Handler
 
-Troubleshooting
-- If the action fails to apply a patch, inspect the `llm_response` output to verify it is a valid unified diff.
-- The action uses `git apply --index` to stage changes. Conflicts or malformed patches will cause the apply step to fail.
+```yaml
+name: PR Review Handler
 
-License and contribution
-- This project follows the restack mono-repo conventions. Please open PRs for improvements. See the monorepo root README for contribution workflow.
+on:
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  handle:
+    if: contains(github.event.comment.body, '@ai-bot')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - uses: restack/actions/actions/restack-code@v1
+        with:
+          llm_url: 'http://llm.example.com/v1/chat/completions'
+          model: 'qwen3-coder'
+          comment_body: ${{ github.event.comment.body }}
+          event_name: ${{ github.event_name }}
+          review_comment_path: ${{ github.event.comment.path }}
+          review_comment_line: ${{ github.event.comment.line }}
+          pr_head_ref: ${{ github.event.pull_request.head.ref }}
+          pr_base_ref: ${{ github.event.pull_request.base.ref }}
+          commit: 'true'
+          post_comment: 'true'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+## Development
+
+### Build
+
+```bash
+cd actions/restack-code
+pnpm install
+pnpm build
+```
+
+### Test
+
+```bash
+pnpm test
+```
+
+### Files
+
+- [action.yml](./action.yml) - Action metadata and inputs
+- [src/index.ts](./src/index.ts) - Main action entry point
+- [src/llm-client.ts](./src/llm-client.ts) - LLM HTTP client
+- [src/utils.ts](./src/utils.ts) - Utility functions
+
+## Notes
+
+- **Local LLM Access**: Ensure the runner has network access to your LLM endpoint
+- **Security**: Be cautious with LLM-driven commits; consider requiring PR reviews
+- **Testing**: Run with `commit=false` first to inspect LLM responses
+
+## License
+
+See the monorepo root for license information.

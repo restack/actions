@@ -8,7 +8,11 @@ Yet Another Delicious GitHub Actions monorepo for Restack.
 Updates Kubernetes manifests with new container images. Supports direct commits and Pull Requests.
 
 ### [restack-code](./actions/restack-code)
-Interact with a local LLM to analyze or modify repository files. Supports JSON-based file actions or unified diff patches, with options to commit changes directly or create Pull Requests. Features include GitHub App authentication, issue/PR context injection, and automatic comment posting.
+Interact with a local LLM to analyze or modify repository files. Supports JSON-based file actions or unified diff patches, with options to commit changes directly or create Pull Requests. Features include:
+- GitHub App authentication
+- Issue/PR context injection
+- **PR review comment support** - respond to code review comments and push fixes to PR branches
+- Automatic comment posting
 
 ## Development
 
