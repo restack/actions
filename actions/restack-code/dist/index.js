@@ -50365,6 +50365,105 @@ async function findExistingPR(octokit, owner, repo, head) {
     }
     return null;
 }
+function stripNonDiffPrefix(patchText) {
+    const lines = patchText.split(/\r?\n/);
+    const firstDiff = lines.findIndex((line) => line.startsWith('diff --git '));
+    if (firstDiff === -1) {
+        return patchText;
+    }
+    return lines.slice(firstDiff).join('\n');
+}
+function splitPatchBlocks(patchText) {
+    const lines = patchText.split(/\r?\n/);
+    const blocks = [];
+    let current = [];
+    let seenDiff = false;
+    for (const line of lines) {
+        if (line.startsWith('diff --git ')) {
+            if (current.length) {
+                blocks.push(buildPatchBlock(current));
+            }
+            current = [line];
+            seenDiff = true;
+            continue;
+        }
+        if (!seenDiff) {
+            continue;
+        }
+        current.push(line);
+    }
+    if (current.length) {
+        blocks.push(buildPatchBlock(current));
+    }
+    if (!seenDiff) {
+        return [{ raw: patchText, filePath: null, isNewFile: false }];
+    }
+    return blocks;
+}
+function buildPatchBlock(lines) {
+    const raw = lines.join('\n');
+    const match = raw.match(/^diff --git a\/(.+?) b\/(.+)$/m);
+    const filePath = match ? match[2].trim() : null;
+    const isNewFile = /^new file mode /m.test(raw) || /^--- \/dev\/null$/m.test(raw);
+    return { raw, filePath, isNewFile };
+}
+function extractNewFileContent(block) {
+    const lines = block.raw.split(/\r?\n/);
+    const contentLines = [];
+    let hasNoNewline = false;
+    for (const line of lines) {
+        if (line.startsWith('diff --git ') ||
+            line.startsWith('new file mode ') ||
+            line.startsWith('index ') ||
+            line.startsWith('--- ') ||
+            line.startsWith('+++ ') ||
+            line.startsWith('@@')) {
+            continue;
+        }
+        if (line === '\\ No newline at end of file') {
+            hasNoNewline = true;
+            continue;
+        }
+        if (line.startsWith('+')) {
+            contentLines.push(line.slice(1));
+        }
+    }
+    let content = contentLines.join('\n');
+    if (!hasNoNewline && contentLines.length > 0) {
+        content += '\n';
+    }
+    return { content };
+}
+async function applyNewFileBlocksForExistingFiles(patchText, repoRoot, git) {
+    const blocks = splitPatchBlocks(patchText);
+    const kept = [];
+    const appliedFiles = [];
+    for (const block of blocks) {
+        if (!block.filePath || !block.isNewFile) {
+            kept.push(block.raw);
+            continue;
+        }
+        const absolutePath = path.join(repoRoot, block.filePath);
+        let exists = false;
+        try {
+            await fs.access(absolutePath);
+            exists = true;
+        }
+        catch {
+            exists = false;
+        }
+        if (!exists) {
+            kept.push(block.raw);
+            continue;
+        }
+        const { content } = extractNewFileContent(block);
+        await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+        await fs.writeFile(absolutePath, content, 'utf8');
+        await git.add(block.filePath);
+        appliedFiles.push(block.filePath);
+    }
+    return { remainingPatch: kept.join('\n'), appliedFiles };
+}
 /**
  * Execute file actions from LLM response
  */
@@ -50703,7 +50802,7 @@ async function run() {
                 // Handle unified diff response
                 core.info('LLM response looks like a patch. Applying patch...');
                 const tmpPatchPath = path.join(repoRoot, 'llm_suggested.patch');
-                await fs.writeFile(tmpPatchPath, llmResponse, 'utf8');
+                const patchText = stripNonDiffPrefix(llmResponse);
                 try {
                     // Handle branch creation/checkout
                     const existingPR = octokit ? await findExistingPR(octokit, owner, repoName, branch) : null;
@@ -50726,8 +50825,18 @@ async function run() {
                         }
                         await git.checkoutLocalBranch(branch);
                     }
-                    // Apply patch and update index
-                    (0, child_process_1.execSync)(`git apply --index ${JSON.stringify(tmpPatchPath)}`, { stdio: 'inherit' });
+                    const { remainingPatch, appliedFiles } = await applyNewFileBlocksForExistingFiles(patchText, repoRoot, git);
+                    if (appliedFiles.length > 0) {
+                        core.info(`Replaced existing files from new-file patch: ${appliedFiles.join(', ')}`);
+                    }
+                    if (remainingPatch.trim()) {
+                        await fs.writeFile(tmpPatchPath, remainingPatch, 'utf8');
+                        // Apply patch and update index
+                        (0, child_process_1.execSync)(`git apply --index ${JSON.stringify(tmpPatchPath)}`, { stdio: 'inherit' });
+                    }
+                    else {
+                        core.info('Patch contained only new-file blocks that already existed.');
+                    }
                     const stagedAfterPatch = await hasStagedChanges(git);
                     if (!stagedAfterPatch) {
                         core.warning('Patch applied but no staged changes were detected.');
