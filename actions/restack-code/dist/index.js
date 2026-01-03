@@ -51065,6 +51065,15 @@ function tryParseActionResponse(text) {
     // Strategy 3: Fix common LLM JSON issues
     // Remove trailing commas before } or ]
     jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+    // Strategy 3.5: Fix invalid backslash escapes in content fields
+    // LLMs sometimes generate invalid escape sequences like \ followed by space or at EOL
+    // This fixes common issues like: "value"\ or "value"\  
+    jsonStr = jsonStr.replace(/"content"\s*:\s*"((?:[^"\\]|\\.)*)"/g, (match, content) => {
+        // Remove backslash before spaces and other invalid characters
+        // Keep only valid escapes: \n \t \r \" \\
+        const fixed = content.replace(/\\(?![ntr"\\])/g, '');
+        return `"content":"${fixed}"`;
+    });
     try {
         const parsed = JSON.parse(jsonStr);
         if (parsed && (parsed.actions || parsed.analysis)) {
@@ -51089,9 +51098,9 @@ function tryParseActionResponse(text) {
         // Strategy 4: Try to repair truncated JSON (missing closing braces)
         // This happens when LLM hits token limit
         let repaired = jsonStr;
-        let openBraces = (repaired.match(/{/g) || []).length;
+        const openBraces = (repaired.match(/{/g) || []).length;
         let closeBraces = (repaired.match(/}/g) || []).length;
-        let openBrackets = (repaired.match(/\[/g) || []).length;
+        const openBrackets = (repaired.match(/\[/g) || []).length;
         let closeBrackets = (repaired.match(/]/g) || []).length;
         // Close unclosed brackets and braces
         while (openBrackets > closeBrackets) {
