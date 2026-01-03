@@ -47,7 +47,7 @@ export function tryParseActionResponse(text: string | null | undefined): LLMActi
 
   // Strategy 3.5: Fix invalid backslash escapes in content fields
   // LLMs sometimes generate invalid escape sequences like \ followed by space or at EOL
-  // This fixes common issues like: "value"\ or "value"\  
+  // This fixes common issues like: "value"\ or "value"\
   jsonStr = jsonStr.replace(
     /"content"\s*:\s*"((?:[^"\\]|\\.)*)"/g,
     (match, content) => {
@@ -178,4 +178,52 @@ export function resolveRepoFilePath(
   }
 
   return { resolvedPath, relativePath };
+}
+
+/**
+ * Validate YAML content for duplicate keys
+ * Returns error message if duplicates found, null if valid
+ */
+export function validateYAMLNoDuplicateKeys(content: string): string | null {
+  const lines = content.split('\n');
+  const keysByLevel: Map<number, Set<string>> = new Map();
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Skip empty lines and comments
+    if (!line.trim() || line.trim().startsWith('#')) {
+      continue;
+    }
+
+    // Match YAML key (with indentation)
+    const match = line.match(/^(\s*)([a-zA-Z0-9_-]+):/);
+    if (!match) {
+      continue;
+    }
+
+    const indent = match[1].length;
+    const key = match[2];
+
+    // Clear deeper levels when we go back to shallower indentation
+    for (const [level] of keysByLevel) {
+      if (level > indent) {
+        keysByLevel.delete(level);
+      }
+    }
+
+    // Check for duplicate at this level
+    if (!keysByLevel.has(indent)) {
+      keysByLevel.set(indent, new Set());
+    }
+
+    const keysAtLevel = keysByLevel.get(indent)!;
+    if (keysAtLevel.has(key)) {
+      return `Duplicate YAML key '${key}' found at line ${i + 1} (indent ${indent})`;
+    }
+
+    keysAtLevel.add(key);
+  }
+
+  return null;
 }

@@ -13,6 +13,7 @@ import {
   looksLikeUnifiedDiff,
   resolveRepoFilePath,
   tryParseActionResponse,
+  validateYAMLNoDuplicateKeys,
 } from './utils';
 
 /**
@@ -274,6 +275,17 @@ async function executeFileActions(
           core.warning(`No content provided for ${action.type} action on ${relativePath}`);
           continue;
         }
+
+        // Validate YAML files for duplicate keys
+        if (relativePath.endsWith('.yaml') || relativePath.endsWith('.yml')) {
+          const validationError = validateYAMLNoDuplicateKeys(action.content);
+          if (validationError) {
+            core.warning(`YAML validation failed for ${relativePath}: ${validationError}`);
+            core.warning('Skipping file due to duplicate keys. LLM must fix this issue.');
+            continue;
+          }
+        }
+
         try {
           const dir = path.dirname(resolvedPath);
           await fs.mkdir(dir, { recursive: true });
