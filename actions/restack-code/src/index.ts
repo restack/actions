@@ -487,9 +487,11 @@ async function run(): Promise<void> {
         core.info('Detected structured JSON response with file actions.');
 
         analysis = actionResponse.analysis || '';
-        finalCommitMessage = actionResponse.commit_message || commitMessage;
-        finalPrTitle = actionResponse.pr_title || prTitle;
-        finalPrBody = actionResponse.pr_body || prBody;
+        // Workflow-provided values take precedence over LLM-generated ones
+        // This ensures consistent PR titles like "fix: Issue #123" instead of generic "fix issues"
+        finalCommitMessage = commitMessage || actionResponse.commit_message || 'Apply changes suggested by restack-code';
+        finalPrTitle = prTitle || actionResponse.pr_title || 'chore: Apply LLM suggested changes';
+        finalPrBody = prBody || actionResponse.pr_body || 'This PR contains changes suggested by restack-code.';
 
         // Determine the target branch
         // For PR review comments, use the PR's head branch; otherwise use the configured branch
