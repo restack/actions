@@ -570,17 +570,29 @@ async function run(): Promise<void> {
         }
       } else {
         core.warning('Commit requested but LLM response is neither JSON actions nor unified diff. No changes applied.');
+
+        // Log partial response for debugging (first 500 chars)
+        const truncatedResponse = llmResponse.length > 500 ? llmResponse.slice(0, 500) + '...' : llmResponse;
+        core.info(`LLM response preview: ${truncatedResponse}`);
+
+        // Check if it looks like JSON but failed to parse
+        if (llmResponse.includes('"actions"') || llmResponse.includes('"analysis"')) {
+          core.warning('Response contains JSON-like structure but failed to parse. Check for syntax errors in the response.');
+        }
+
         core.setOutput('summary', 'No actionable response found from LLM.');
 
         // Still post analysis comment if we have one
         if (postCommentOnComplete && octokit && issueNumber) {
-          await postComment(
-            octokit,
-            owner,
-            repoName,
-            issueNumber,
-            `## 💬 Response\n\n${llmResponse}\n\n---\n*Powered by ${model || 'local LLM'}*`
-          );
+          // Try to extract just the analysis part if possible
+          const analysisMatch = llmResponse.match(/"analysis"\s*:\s*"([^"]+)"/);
+          const analysis = analysisMatch ? analysisMatch[1] : null;
+
+          const commentBodyText = analysis
+            ? `## 🔍 Analysis\n\n${analysis}\n\n⚠️ *Note: Full response could not be parsed as valid JSON. No file changes were applied.*\n\n---\n*Powered by ${model || 'local LLM'}*`
+            : `## 💬 Response\n\n${llmResponse}\n\n---\n*Powered by ${model || 'local LLM'}*`;
+
+          await postComment(octokit, owner, repoName, issueNumber, commentBodyText);
         }
       }
     } else {
