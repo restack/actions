@@ -50432,12 +50432,23 @@ function extractNewFileContent(block) {
     if (!hasNoNewline && contentLines.length > 0) {
         content += '\n';
     }
-    return { content };
+    // Detect and truncate repetitive content in extracted file content
+    let truncated = false;
+    if (block.filePath && (block.filePath.endsWith('.yaml') || block.filePath.endsWith('.yml'))) {
+        const repetitionCheck = (0, utils_1.detectAndTruncateRepetition)(content, 30, 2);
+        if (repetitionCheck.truncated) {
+            core.warning(`Detected repetitive content in diff for ${block.filePath}: ${repetitionCheck.pattern}`);
+            content = repetitionCheck.content;
+            truncated = true;
+        }
+    }
+    return { content, truncated };
 }
 async function applyNewFileBlocksForExistingFiles(patchText, repoRoot, git) {
     const blocks = splitPatchBlocks(patchText);
     const kept = [];
     const appliedFiles = [];
+    const truncatedFiles = [];
     for (const block of blocks) {
         if (!block.filePath || !block.isNewFile) {
             kept.push(block.raw);
@@ -50452,17 +50463,26 @@ async function applyNewFileBlocksForExistingFiles(patchText, repoRoot, git) {
         catch {
             exists = false;
         }
+        // For new files (not existing), also extract and apply with repetition detection
+        const { content, truncated } = extractNewFileContent(block);
+        if (truncated) {
+            truncatedFiles.push(block.filePath);
+        }
         if (!exists) {
-            kept.push(block.raw);
+            // For new files, write directly instead of using git apply (to apply repetition fix)
+            await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+            await fs.writeFile(absolutePath, content, 'utf8');
+            await git.add(block.filePath);
+            appliedFiles.push(block.filePath);
             continue;
         }
-        const { content } = extractNewFileContent(block);
+        // For existing files, also write directly
         await fs.mkdir(path.dirname(absolutePath), { recursive: true });
         await fs.writeFile(absolutePath, content, 'utf8');
         await git.add(block.filePath);
         appliedFiles.push(block.filePath);
     }
-    return { remainingPatch: kept.join('\n'), appliedFiles };
+    return { remainingPatch: kept.join('\n'), appliedFiles, truncatedFiles };
 }
 /**
  * Execute file actions from LLM response
@@ -50846,9 +50866,12 @@ async function run() {
                         }
                         await git.checkoutLocalBranch(branch);
                     }
-                    const { remainingPatch, appliedFiles } = await applyNewFileBlocksForExistingFiles(patchText, repoRoot, git);
+                    const { remainingPatch, appliedFiles, truncatedFiles } = await applyNewFileBlocksForExistingFiles(patchText, repoRoot, git);
                     if (appliedFiles.length > 0) {
-                        core.info(`Replaced existing files from new-file patch: ${appliedFiles.join(', ')}`);
+                        core.info(`Applied files from patch: ${appliedFiles.join(', ')}`);
+                    }
+                    if (truncatedFiles.length > 0) {
+                        core.warning(`Truncated repetitive content in files: ${truncatedFiles.join(', ')}`);
                     }
                     if (remainingPatch.trim()) {
                         await fs.writeFile(tmpPatchPath, remainingPatch, 'utf8');
