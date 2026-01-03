@@ -9,6 +9,7 @@ import { execSync } from 'child_process';
 import LLMClient, { MessageFormat } from './llm-client';
 import {
   buildContext,
+  detectAndTruncateRepetition,
   FileAction,
   looksLikeUnifiedDiff,
   resolveRepoFilePath,
@@ -270,15 +271,26 @@ async function executeFileActions(
         break;
 
       case 'create':
-      case 'modify':
+      case 'modify': {
         if (!action.content) {
           core.warning(`No content provided for ${action.type} action on ${relativePath}`);
           continue;
         }
 
-        // Validate YAML files for duplicate keys
+        let contentToWrite = action.content;
+
+        // For YAML files, detect and handle repetition issues
         if (relativePath.endsWith('.yaml') || relativePath.endsWith('.yml')) {
-          const validationError = validateYAMLNoDuplicateKeys(action.content);
+          // First, detect and truncate repetitive content (LLM repetition loop)
+          const repetitionCheck = detectAndTruncateRepetition(contentToWrite, 50, 2);
+          if (repetitionCheck.truncated) {
+            core.warning(`Detected repetitive content in ${relativePath}: ${repetitionCheck.pattern}`);
+            core.warning('Content was truncated to remove repetition. This indicates an LLM issue.');
+            contentToWrite = repetitionCheck.content;
+          }
+
+          // Then validate for duplicate YAML keys
+          const validationError = validateYAMLNoDuplicateKeys(contentToWrite);
           if (validationError) {
             core.warning(`YAML validation failed for ${relativePath}: ${validationError}`);
             core.warning('Skipping file due to duplicate keys. LLM must fix this issue.');
@@ -289,7 +301,7 @@ async function executeFileActions(
         try {
           const dir = path.dirname(resolvedPath);
           await fs.mkdir(dir, { recursive: true });
-          await fs.writeFile(resolvedPath, action.content, 'utf8');
+          await fs.writeFile(resolvedPath, contentToWrite, 'utf8');
           await git.add(relativePath);
           core.info(`${action.type === 'create' ? 'Created' : 'Modified'}: ${relativePath}`);
           changesCount++;
@@ -298,6 +310,7 @@ async function executeFileActions(
           core.warning(`Failed to ${action.type} ${relativePath}: ${err?.message ?? e}`);
         }
         break;
+      }
     }
   }
 

@@ -50489,15 +50489,33 @@ async function executeFileActions(actions, git, repoRoot) {
                 }
                 break;
             case 'create':
-            case 'modify':
+            case 'modify': {
                 if (!action.content) {
                     core.warning(`No content provided for ${action.type} action on ${relativePath}`);
                     continue;
                 }
+                let contentToWrite = action.content;
+                // For YAML files, detect and handle repetition issues
+                if (relativePath.endsWith('.yaml') || relativePath.endsWith('.yml')) {
+                    // First, detect and truncate repetitive content (LLM repetition loop)
+                    const repetitionCheck = (0, utils_1.detectAndTruncateRepetition)(contentToWrite, 50, 2);
+                    if (repetitionCheck.truncated) {
+                        core.warning(`Detected repetitive content in ${relativePath}: ${repetitionCheck.pattern}`);
+                        core.warning('Content was truncated to remove repetition. This indicates an LLM issue.');
+                        contentToWrite = repetitionCheck.content;
+                    }
+                    // Then validate for duplicate YAML keys
+                    const validationError = (0, utils_1.validateYAMLNoDuplicateKeys)(contentToWrite);
+                    if (validationError) {
+                        core.warning(`YAML validation failed for ${relativePath}: ${validationError}`);
+                        core.warning('Skipping file due to duplicate keys. LLM must fix this issue.');
+                        continue;
+                    }
+                }
                 try {
                     const dir = path.dirname(resolvedPath);
                     await fs.mkdir(dir, { recursive: true });
-                    await fs.writeFile(resolvedPath, action.content, 'utf8');
+                    await fs.writeFile(resolvedPath, contentToWrite, 'utf8');
                     await git.add(relativePath);
                     core.info(`${action.type === 'create' ? 'Created' : 'Modified'}: ${relativePath}`);
                     changesCount++;
@@ -50507,6 +50525,7 @@ async function executeFileActions(actions, git, repoRoot) {
                     core.warning(`Failed to ${action.type} ${relativePath}: ${err?.message ?? e}`);
                 }
                 break;
+            }
         }
     }
     return changesCount;
@@ -50669,9 +50688,11 @@ async function run() {
                 // Handle structured JSON response with file actions
                 core.info('Detected structured JSON response with file actions.');
                 analysis = actionResponse.analysis || '';
-                finalCommitMessage = actionResponse.commit_message || commitMessage;
-                finalPrTitle = actionResponse.pr_title || prTitle;
-                finalPrBody = actionResponse.pr_body || prBody;
+                // Workflow-provided values take precedence over LLM-generated ones
+                // This ensures consistent PR titles like "fix: Issue #123" instead of generic "fix issues"
+                finalCommitMessage = commitMessage || actionResponse.commit_message || 'Apply changes suggested by restack-code';
+                finalPrTitle = prTitle || actionResponse.pr_title || 'chore: Apply LLM suggested changes';
+                finalPrBody = prBody || actionResponse.pr_body || 'This PR contains changes suggested by restack-code.';
                 // Determine the target branch
                 // For PR review comments, use the PR's head branch; otherwise use the configured branch
                 const targetBranch = isPRReviewComment && prHeadRef ? prHeadRef : branch;
@@ -51146,6 +51167,9 @@ exports.looksLikeUnifiedDiff = looksLikeUnifiedDiff;
 exports.tryParseActionResponse = tryParseActionResponse;
 exports.buildContext = buildContext;
 exports.resolveRepoFilePath = resolveRepoFilePath;
+exports.validateYAMLNoDuplicateKeys = validateYAMLNoDuplicateKeys;
+exports.detectAndTruncateRepetition = detectAndTruncateRepetition;
+exports.cleanYAMLDuplicateSections = cleanYAMLDuplicateSections;
 const path = __importStar(__nccwpck_require__(6928));
 function looksLikeUnifiedDiff(text) {
     if (!text)
@@ -51176,7 +51200,7 @@ function tryParseActionResponse(text) {
     jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
     // Strategy 3.5: Fix invalid backslash escapes in content fields
     // LLMs sometimes generate invalid escape sequences like \ followed by space or at EOL
-    // This fixes common issues like: "value"\ or "value"\  
+    // This fixes common issues like: "value"\ or "value"\
     jsonStr = jsonStr.replace(/"content"\s*:\s*"((?:[^"\\]|\\.)*)"/g, (match, content) => {
         // Remove backslash before spaces and other invalid characters
         // Keep only valid escapes: \n \t \r \" \\
@@ -51278,6 +51302,169 @@ function resolveRepoFilePath(repoRoot, actionPath) {
         return null;
     }
     return { resolvedPath, relativePath };
+}
+/**
+ * Validate YAML content for duplicate keys
+ * Returns error message if duplicates found, null if valid
+ */
+function validateYAMLNoDuplicateKeys(content) {
+    const lines = content.split('\n');
+    const keysByLevel = new Map();
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        // Skip empty lines and comments
+        if (!line.trim() || line.trim().startsWith('#')) {
+            continue;
+        }
+        // Match YAML key (with indentation)
+        const match = line.match(/^(\s*)([a-zA-Z0-9_-]+):/);
+        if (!match) {
+            continue;
+        }
+        const indent = match[1].length;
+        const key = match[2];
+        // Clear deeper levels when we go back to shallower indentation
+        for (const [level] of keysByLevel) {
+            if (level > indent) {
+                keysByLevel.delete(level);
+            }
+        }
+        // Check for duplicate at this level
+        if (!keysByLevel.has(indent)) {
+            keysByLevel.set(indent, new Set());
+        }
+        const keysAtLevel = keysByLevel.get(indent);
+        if (keysAtLevel.has(key)) {
+            return `Duplicate YAML key '${key}' found at line ${i + 1} (indent ${indent})`;
+        }
+        keysAtLevel.add(key);
+    }
+    return null;
+}
+/**
+ * Detect and truncate repetitive content in LLM output
+ * This handles the common LLM "repetition loop" problem where the model
+ * generates the same content pattern multiple times
+ *
+ * @param content The content to check
+ * @param minPatternLength Minimum length of pattern to detect (default: 50)
+ * @param maxRepetitions Maximum allowed repetitions before truncation (default: 2)
+ * @returns Object with cleaned content and whether truncation occurred
+ */
+function detectAndTruncateRepetition(content, minPatternLength = 50, maxRepetitions = 2) {
+    // Strategy 1: Detect exact repeated blocks
+    // Look for patterns that repeat more than maxRepetitions times
+    for (let patternLen = minPatternLength; patternLen <= Math.min(500, content.length / 3); patternLen += 10) {
+        for (let start = 0; start < content.length - patternLen * (maxRepetitions + 1); start++) {
+            const pattern = content.slice(start, start + patternLen);
+            // Skip patterns that are mostly whitespace
+            if (pattern.replace(/\s/g, '').length < patternLen * 0.3) {
+                continue;
+            }
+            // Count occurrences of this pattern
+            let count = 0;
+            let pos = start;
+            while ((pos = content.indexOf(pattern, pos)) !== -1) {
+                count++;
+                pos += patternLen;
+            }
+            if (count > maxRepetitions) {
+                // Found repetition! Truncate after the first occurrence
+                const firstEnd = start + patternLen;
+                const truncated = content.slice(0, firstEnd);
+                // Try to find a clean break point (end of YAML block)
+                const cleanBreak = truncated.lastIndexOf('\n\n');
+                if (cleanBreak > truncated.length * 0.7) {
+                    return {
+                        content: truncated.slice(0, cleanBreak),
+                        truncated: true,
+                        pattern: pattern.slice(0, 100) + '...'
+                    };
+                }
+                return {
+                    content: truncated,
+                    truncated: true,
+                    pattern: pattern.slice(0, 100) + '...'
+                };
+            }
+        }
+    }
+    // Strategy 2: Detect YAML key repetition patterns
+    // Look for the same top-level key appearing multiple times
+    const yamlKeyPattern = /^(\s{2,})([a-zA-Z][a-zA-Z0-9_-]*):/gm;
+    const keyOccurrences = new Map();
+    let match;
+    while ((match = yamlKeyPattern.exec(content)) !== null) {
+        const indent = match[1].length;
+        const key = match[2];
+        const fullKey = `${indent}:${key}`;
+        if (!keyOccurrences.has(fullKey)) {
+            keyOccurrences.set(fullKey, []);
+        }
+        keyOccurrences.get(fullKey).push(match.index);
+    }
+    // Check for keys that appear too many times at the same indent level
+    for (const [fullKey, positions] of keyOccurrences) {
+        if (positions.length > maxRepetitions + 1) {
+            // Truncate at the position after maxRepetitions occurrences
+            const truncateAt = positions[maxRepetitions];
+            const truncated = content.slice(0, truncateAt);
+            // Find clean break
+            const cleanBreak = truncated.lastIndexOf('\n');
+            if (cleanBreak > 0) {
+                return {
+                    content: truncated.slice(0, cleanBreak),
+                    truncated: true,
+                    pattern: `YAML key '${fullKey.split(':')[1]}' repeated ${positions.length} times`
+                };
+            }
+        }
+    }
+    return { content, truncated: false };
+}
+/**
+ * Clean YAML content by removing duplicate sections
+ * Specifically handles the case where LLM generates duplicate YAML blocks
+ */
+function cleanYAMLDuplicateSections(content) {
+    const lines = content.split('\n');
+    const seenSections = new Map();
+    const result = [];
+    let currentSection = '';
+    let currentSectionStart = 0;
+    let currentIndent = 0;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        // Detect section headers (top-level keys with specific indent)
+        const keyMatch = line.match(/^(\s*)([a-zA-Z][a-zA-Z0-9_-]*):/);
+        if (keyMatch) {
+            const indent = keyMatch[1].length;
+            const key = keyMatch[2];
+            // If this is a top-level or near-top-level key
+            if (indent <= 10) {
+                // Save previous section if it exists
+                if (currentSection && currentSectionStart < i) {
+                    const sectionKey = `${currentIndent}:${currentSection}`;
+                    if (!seenSections.has(sectionKey)) {
+                        seenSections.set(sectionKey, i);
+                        result.push(...lines.slice(currentSectionStart, i));
+                    }
+                    // Skip duplicate sections
+                }
+                currentSection = key;
+                currentSectionStart = i;
+                currentIndent = indent;
+            }
+        }
+    }
+    // Don't forget the last section
+    if (currentSectionStart < lines.length) {
+        const sectionKey = `${currentIndent}:${currentSection}`;
+        if (!seenSections.has(sectionKey)) {
+            result.push(...lines.slice(currentSectionStart));
+        }
+    }
+    return result.join('\n');
 }
 
 
