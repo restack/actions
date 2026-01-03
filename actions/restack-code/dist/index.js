@@ -50596,10 +50596,11 @@ async function run() {
         const format = (core.getInput('format') || 'auto');
         // Commit/PR options
         const commit = core.getInput('commit') === 'true';
-        const commitMessage = core.getInput('commit_message') || 'Apply changes suggested by restack-code';
+        // Use empty string to allow LLM-generated values when workflow doesn't provide them
+        const commitMessage = core.getInput('commit_message');
         const createPr = core.getInput('create_pr') === 'true';
-        const prTitle = core.getInput('pr_title') || 'chore: Apply LLM suggested changes';
-        const prBody = core.getInput('pr_body') || 'This PR contains changes suggested by restack-code.';
+        const prTitle = core.getInput('pr_title');
+        const prBody = core.getInput('pr_body');
         const branch = core.getInput('branch') || 'restack/llm-suggestions';
         const baseBranch = core.getInput('base_branch') || 'main';
         const botName = core.getInput('bot_name') || 'restack-code';
