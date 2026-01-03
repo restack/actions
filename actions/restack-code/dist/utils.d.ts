@@ -32,6 +32,9 @@ export declare function resolveRepoFilePath(repoRoot: string, actionPath: string
 /**
  * Validate YAML content for duplicate keys
  * Returns error message if duplicates found, null if valid
+ *
+ * Note: This function detects duplicate keys within the SAME mapping context.
+ * Keys in different array items (e.g., multiple objects in a list) are NOT duplicates.
  */
 export declare function validateYAMLNoDuplicateKeys(content: string): string | null;
 /**

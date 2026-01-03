@@ -51333,15 +51333,35 @@ function resolveRepoFilePath(repoRoot, actionPath) {
 /**
  * Validate YAML content for duplicate keys
  * Returns error message if duplicates found, null if valid
+ *
+ * Note: This function detects duplicate keys within the SAME mapping context.
+ * Keys in different array items (e.g., multiple objects in a list) are NOT duplicates.
  */
 function validateYAMLNoDuplicateKeys(content) {
     const lines = content.split('\n');
-    const keysByLevel = new Map();
+    // Track keys by (indent, context) where context changes on array items
+    const keysByContext = new Map();
+    // Track array item indices at each indent level
+    const arrayItemIndex = new Map();
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         // Skip empty lines and comments
         if (!line.trim() || line.trim().startsWith('#')) {
             continue;
+        }
+        // Detect array item start (- at any indent level)
+        const arrayMatch = line.match(/^(\s*)-\s/);
+        if (arrayMatch) {
+            const arrayIndent = arrayMatch[1].length;
+            // Increment array item index at this level
+            const currentIndex = arrayItemIndex.get(arrayIndent) ?? 0;
+            arrayItemIndex.set(arrayIndent, currentIndex + 1);
+            // Clear deeper array indices when new array item starts
+            for (const [level] of arrayItemIndex) {
+                if (level > arrayIndent) {
+                    arrayItemIndex.delete(level);
+                }
+            }
         }
         // Match YAML key (with indentation)
         const match = line.match(/^(\s*)([a-zA-Z0-9_-]+):/);
@@ -51350,21 +51370,30 @@ function validateYAMLNoDuplicateKeys(content) {
         }
         const indent = match[1].length;
         const key = match[2];
-        // Clear deeper levels when we go back to shallower indentation
-        for (const [level] of keysByLevel) {
-            if (level > indent) {
-                keysByLevel.delete(level);
+        // Build context key that includes array item indices for parent levels
+        // This ensures keys in different array items are tracked separately
+        let contextKey = `${indent}`;
+        for (const [level, idx] of arrayItemIndex) {
+            if (level < indent) {
+                contextKey += `:arr${level}=${idx}`;
             }
         }
-        // Check for duplicate at this level
-        if (!keysByLevel.has(indent)) {
-            keysByLevel.set(indent, new Set());
+        // Clear deeper contexts when we go back to shallower indentation
+        for (const [ctx] of keysByContext) {
+            const ctxIndent = parseInt(ctx.split(':')[0], 10);
+            if (ctxIndent > indent) {
+                keysByContext.delete(ctx);
+            }
         }
-        const keysAtLevel = keysByLevel.get(indent);
-        if (keysAtLevel.has(key)) {
+        // Check for duplicate at this context
+        if (!keysByContext.has(contextKey)) {
+            keysByContext.set(contextKey, new Set());
+        }
+        const keysAtContext = keysByContext.get(contextKey);
+        if (keysAtContext.has(key)) {
             return `Duplicate YAML key '${key}' found at line ${i + 1} (indent ${indent})`;
         }
-        keysAtLevel.add(key);
+        keysAtContext.add(key);
     }
     return null;
 }
